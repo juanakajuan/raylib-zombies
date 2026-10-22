@@ -268,6 +268,10 @@ int main(int argc, char **argv)
     bool smoke = argc > 1 && strcmp(argv[1], "--smoke") == 0;
     SetConfigFlags(FLAG_MSAA_4X_HINT);
     InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Zombies");
+    // GLFW lists the primary monitor first.
+    Vector2 monitor = GetMonitorPosition(0);
+    SetWindowPosition((int)monitor.x + (GetMonitorWidth(0) - WINDOW_WIDTH) / 2,
+                      (int)monitor.y + (GetMonitorHeight(0) - WINDOW_HEIGHT) / 2);
     SetTargetFPS(TARGET_FPS);
     int status = smoke ? RunSmoke() : RunGame();
     CloseWindow();
