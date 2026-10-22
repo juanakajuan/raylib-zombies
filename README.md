@@ -5,7 +5,9 @@ Survive rounds of zombies, earn points by shooting them, and spend points on a d
 
 ## Build and run
 
-`./run.sh` builds the game if needed and then starts it. It passes its arguments to the game, as in `./run.sh --smoke`.
+`./run.sh` builds the game if needed and then starts it. It passes its arguments to the game, as in `./run.sh --fullscreen`.
+
+The game opens in a 1280x720 window on the primary monitor. Use `--fullscreen` to start in fullscreen at the monitor's native resolution. `--smoke` runs a scripted session that saves three screenshots and always uses the window.
 
 To do the steps by hand:
 
@@ -30,6 +32,7 @@ On Linux it also needs the X11 and OpenGL development headers.
 | Q | Swap weapon |
 | Shift | Sprint |
 | Esc | Pause and free the mouse. Esc again resumes, Q quits while paused |
+| F11 or Alt+Enter | Switch between fullscreen and windowed |
 
 ## Features
 

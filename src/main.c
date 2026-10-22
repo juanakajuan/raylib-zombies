@@ -25,6 +25,11 @@
 #define SMOKE_SHOTS 3
 #define SMOKE_MAX_TURN 0.07f
 
+typedef enum DisplayMode {
+    DISPLAY_WINDOWED,
+    DISPLAY_FULLSCREEN,
+} DisplayMode;
+
 typedef struct SimClock {
     FrameInput pending;
     float accumulator;
@@ -83,6 +88,34 @@ static void AdvanceSim(GameState *g, SimClock *clock, const FrameInput *fresh, f
     }
 }
 
+/* GLFW lists the primary monitor first. */
+static void SetDisplayMode(DisplayMode mode)
+{
+    Vector2 monitor = GetMonitorPosition(0);
+    int monitor_width = GetMonitorWidth(0);
+    int monitor_height = GetMonitorHeight(0);
+    switch (mode) {
+    case DISPLAY_FULLSCREEN:
+        if (IsWindowFullscreen()) return;
+        SetWindowPosition((int)monitor.x, (int)monitor.y);
+        SetWindowSize(monitor_width, monitor_height);
+        ToggleFullscreen();
+        return;
+    case DISPLAY_WINDOWED:
+        if (IsWindowFullscreen()) ToggleFullscreen();
+        SetWindowSize(WINDOW_WIDTH, WINDOW_HEIGHT);
+        SetWindowPosition((int)monitor.x + (monitor_width - WINDOW_WIDTH) / 2,
+                          (int)monitor.y + (monitor_height - WINDOW_HEIGHT) / 2);
+        return;
+    }
+}
+
+static bool DisplayTogglePressed(void)
+{
+    bool alt = IsKeyDown(KEY_LEFT_ALT) || IsKeyDown(KEY_RIGHT_ALT);
+    return IsKeyPressed(KEY_F11) || (alt && IsKeyPressed(KEY_ENTER));
+}
+
 /* Pause lives here, not in GamePhase: a paused loop just stops stepping the sim. */
 static int RunGame(void)
 {
@@ -96,6 +129,10 @@ static int RunGame(void)
     DisableCursor();
 
     while (!quit && !WindowShouldClose()) {
+        if (DisplayTogglePressed()) {
+            SetDisplayMode(IsWindowFullscreen() ? DISPLAY_WINDOWED : DISPLAY_FULLSCREEN);
+            discard_look_frames = LOOK_SETTLE_FRAMES;
+        }
         if (IsKeyPressed(KEY_ESCAPE)) {
             paused = !paused;
             clock = (SimClock){0};
@@ -265,13 +302,23 @@ static int RunSmoke(void)
 
 int main(int argc, char **argv)
 {
-    bool smoke = argc > 1 && strcmp(argv[1], "--smoke") == 0;
-    SetConfigFlags(FLAG_MSAA_4X_HINT);
+    bool smoke = false;
+    DisplayMode mode = DISPLAY_WINDOWED;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--smoke") == 0) {
+            smoke = true;
+        } else if (strcmp(argv[i], "--fullscreen") == 0) {
+            mode = DISPLAY_FULLSCREEN;
+        } else if (strcmp(argv[i], "--windowed") == 0) {
+            mode = DISPLAY_WINDOWED;
+        } else {
+            fprintf(stderr, "usage: %s [--fullscreen | --windowed] [--smoke]\n", argv[0]);
+            return 2;
+        }
+    }
+    SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);
     InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Zombies");
-    // GLFW lists the primary monitor first.
-    Vector2 monitor = GetMonitorPosition(0);
-    SetWindowPosition((int)monitor.x + (GetMonitorWidth(0) - WINDOW_WIDTH) / 2,
-                      (int)monitor.y + (GetMonitorHeight(0) - WINDOW_HEIGHT) / 2);
+    SetDisplayMode(smoke ? DISPLAY_WINDOWED : mode);
     SetTargetFPS(TARGET_FPS);
     int status = smoke ? RunSmoke() : RunGame();
     CloseWindow();
