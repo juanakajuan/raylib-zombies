@@ -17,6 +17,12 @@
 #define HITMARKER_TIME 0.18f
 #define MUZZLE_FLASH_TIME 0.06f
 #define ZOMBIE_HIT_FLASH_TIME 0.12f
+#define STOP_DISTANCE 0.9f
+#define SEPARATION_DISTANCE 0.85f
+#define SEPARATION_SPEED 2.0f
+#define MIN_SPAWN_DISTANCE 7.0f
+#define FIRST_SPAWN_DELAY 0.8f
+#define SPRINTER_SPEED 4.0f
 #define DOOR_BOX {{-1.5f, 0.0f, -0.3f}, {1.5f, WALL_HEIGHT, 0.3f}}
 #define DEFAULT_SEED 0x9E3779B9u
 
@@ -342,9 +348,180 @@ static void UpdateMovement(GameState *g, const FrameInput *in, float dt)
     g->player_zone = ZoneAt(p->pos, g->player_zone);
 }
 
+int GameAliveZombies(const GameState *g)
+{
+    int alive = 0;
+    for (int i = 0; i < MAX_ZOMBIES; i++) {
+        if (ZombieTargetable(&g->zombies[i])) alive++;
+    }
+    return alive;
+}
+
+static int RoundZombieCount(int round)
+{
+    return 6 + 3 * (round - 1);
+}
+
+static float RoundZombieHealth(int round)
+{
+    float health = 150.0f;
+    for (int r = 2; r <= round; r++) health = r <= 9 ? health + 100.0f : health * 1.1f;
+    return health;
+}
+
+static float RoundZombieSpeed(GameState *g)
+{
+    int round = g->round_number;
+    float speed = fminf(1.2f + 0.12f * (float)(round - 1), 3.0f);
+    float sprinter_chance = fminf(0.6f, 0.15f * (float)(round - 3));
+    if (round > 3 && RngFloat(g) < sprinter_chance) speed = SPRINTER_SPEED;
+    return speed * (0.9f + 0.2f * RngFloat(g));
+}
+
+static float SpawnInterval(int round)
+{
+    return fmaxf(0.4f, 1.6f - 0.1f * (float)(round - 1));
+}
+
+static bool SpawnEligible(const GameState *g, int index, bool need_distance)
+{
+    const SpawnPoint *s = &LEVEL_SPAWNS[index];
+    if (!g->zone_open[s->zone]) return false;
+    return !need_distance || Vector3Distance(s->pos, g->player.pos) >= MIN_SPAWN_DISTANCE;
+}
+
+static int PickSpawn(GameState *g)
+{
+    for (int pass = 0; pass < 2; pass++) {
+        bool need_distance = pass == 0;
+        int eligible = 0;
+        for (int i = 0; i < LEVEL_SPAWN_COUNT; i++) eligible += SpawnEligible(g, i, need_distance);
+        if (eligible == 0) continue;
+        int pick = (int)(RngNext(g) % (uint32_t)eligible);
+        for (int i = 0; i < LEVEL_SPAWN_COUNT; i++) {
+            if (SpawnEligible(g, i, need_distance) && pick-- == 0) return i;
+        }
+    }
+    return -1;
+}
+
+static bool SpawnZombie(GameState *g)
+{
+    Zombie *slot = NULL;
+    for (int i = 0; i < MAX_ZOMBIES && slot == NULL; i++) {
+        if (g->zombies[i].state == ZOMBIE_FREE) slot = &g->zombies[i];
+    }
+    int spawn = PickSpawn(g);
+    if (slot == NULL || spawn < 0) return false;
+
+    float health = RoundZombieHealth(g->round_number);
+    *slot = (Zombie){
+        .state = ZOMBIE_CHASE,
+        .pos = LEVEL_SPAWNS[spawn].pos,
+        .health = health,
+        .max_health = health,
+        .speed = RoundZombieSpeed(g),
+        .attack_timer = 0.6f,
+        .zone = LEVEL_SPAWNS[spawn].zone,
+    };
+    return true;
+}
+
+static Vector3 ZombieSteering(const GameState *g, const Zombie *z)
+{
+    Vector3 target = g->player.pos;
+    if (z->zone != g->player_zone) {
+        target = (Vector3){LEVEL_ZONES[z->zone].portal.x, 0.0f, LEVEL_ZONES[z->zone].portal.y};
+    } else if (Vector3Distance(target, z->pos) <= STOP_DISTANCE) {
+        return Vector3Zero();
+    }
+    return Vector3Normalize(Vector3Subtract(target, z->pos));
+}
+
+static Vector3 ZombieSeparation(const GameState *g, int index)
+{
+    const Zombie *z = &g->zombies[index];
+    Vector3 push = Vector3Zero();
+    for (int j = 0; j < MAX_ZOMBIES; j++) {
+        const Zombie *other = &g->zombies[j];
+        if (j == index || !ZombieTargetable(other)) continue;
+        Vector3 away = Vector3Subtract(z->pos, other->pos);
+        float distance = Vector3Length(away);
+        if (distance >= SEPARATION_DISTANCE) continue;
+        /* Zombies stacked exactly on each other need a deterministic direction to part ways. */
+        if (distance < 1e-4f) {
+            away = (Vector3){index < j ? 1.0f : -1.0f, 0.0f, 0.0f};
+            distance = 1.0f;
+        }
+        float overlap = (SEPARATION_DISTANCE - distance) / SEPARATION_DISTANCE;
+        push = Vector3Add(push, Vector3Scale(away, overlap / distance));
+    }
+    return push;
+}
+
+static void UpdateZombie(GameState *g, int index, float dt)
+{
+    Zombie *z = &g->zombies[index];
+    z->hit_flash = fmaxf(0.0f, z->hit_flash - dt);
+    if (z->state == ZOMBIE_DYING) {
+        z->dying_timer -= dt;
+        if (z->dying_timer <= 0.0f) z->state = ZOMBIE_FREE;
+    }
+    if (!ZombieTargetable(z)) return;
+
+    Vector3 steer = ZombieSteering(g, z);
+    Vector3 velocity = Vector3Add(Vector3Scale(steer, z->speed), Vector3Scale(ZombieSeparation(g, index), SEPARATION_SPEED));
+    z->pos = SlideMove(g, z->pos, Vector3Scale(velocity, dt), ZOMBIE_RADIUS);
+    z->zone = ZoneAt(z->pos, z->zone);
+    if (Vector3LengthSqr(steer) > 0.0f) z->yaw = atan2f(steer.x, -steer.z);
+}
+
+static void EnterPhase(GameState *g, GamePhase phase)
+{
+    g->phase = phase;
+    g->phase_timer = 0.0f;
+}
+
+static void StartRound(GameState *g)
+{
+    g->zombies_left_to_spawn = RoundZombieCount(g->round_number);
+    g->spawn_timer = FIRST_SPAWN_DELAY;
+    EnterPhase(g, PHASE_ROUND_ACTIVE);
+}
+
+static void UpdateSpawner(GameState *g, float dt)
+{
+    g->spawn_timer -= dt;
+    if (g->zombies_left_to_spawn == 0 || g->spawn_timer > 0.0f || GameAliveZombies(g) >= MAX_ALIVE_ZOMBIES) return;
+    if (SpawnZombie(g)) {
+        g->zombies_left_to_spawn--;
+        g->spawn_timer = SpawnInterval(g->round_number);
+    }
+}
+
+static void UpdateRound(GameState *g, float dt)
+{
+    switch (g->phase) {
+    case PHASE_INTERMISSION:
+        if (g->phase_timer >= INTERMISSION_TIME) StartRound(g);
+        break;
+    case PHASE_ROUND_ACTIVE:
+        UpdateSpawner(g, dt);
+        if (g->zombies_left_to_spawn == 0 && GameAliveZombies(g) == 0) {
+            g->round_number++;
+            EnterPhase(g, PHASE_INTERMISSION);
+        }
+        break;
+    case PHASE_GAME_OVER:
+        break;
+    }
+}
+
 void GameUpdate(GameState *g, const FrameInput *in, float dt)
 {
     g->phase_timer += dt;
     UpdateMovement(g, in, dt);
     UpdateWeapon(g, in, dt);
+    for (int i = 0; i < MAX_ZOMBIES; i++) UpdateZombie(g, i, dt);
+    UpdateRound(g, dt);
 }

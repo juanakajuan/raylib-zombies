@@ -176,6 +176,7 @@ void GameInit(GameState *g, uint32_t seed);
 void GameUpdate(GameState *g, const FrameInput *in, float dt);
 
 bool GameBlocked(const GameState *g, Vector3 pos, float radius);
+int GameAliveZombies(const GameState *g);
 Vector3 PlayerEye(const Player *p);
 Vector3 PlayerForward(const Player *p);
 BoundingBox ZombieBodyBox(const Zombie *z);

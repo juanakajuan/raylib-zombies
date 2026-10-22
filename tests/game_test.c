@@ -145,11 +145,203 @@ static void TestHeadshotAndWalls(void)
     CHECK(w.player.points == START_POINTS, "points=%d", w.player.points);
 }
 
+static Zombie *NearestZombie(GameState *g)
+{
+    Zombie *nearest = NULL;
+    float best = INFINITY;
+    for (int i = 0; i < MAX_ZOMBIES; i++) {
+        Zombie *z = &g->zombies[i];
+        if (z->state != ZOMBIE_CHASE && z->state != ZOMBIE_ATTACK) continue;
+        float dx = z->pos.x - g->player.pos.x;
+        float dz = z->pos.z - g->player.pos.z;
+        float d = dx * dx + dz * dz;
+        if (d < best) {
+            best = d;
+            nearest = z;
+        }
+    }
+    return nearest;
+}
+
+static void ShootNearest(GameState *g)
+{
+    FrameInput fire = {.fire_pressed = true};
+    Zombie *z = NearestZombie(g);
+    if (z != NULL) AimAt(&g->player, (Vector3){z->pos.x, 0.7f, z->pos.z});
+    GameUpdate(g, &fire, DT);
+}
+
+static bool OverlapsBox(BoundingBox b, Vector3 p, float r)
+{
+    return p.x + r > b.min.x && p.x - r < b.max.x && p.z + r > b.min.z && p.z - r < b.max.z;
+}
+
+static bool InsideSolid(const GameState *g, Vector3 p, float r)
+{
+    for (int i = 0; i < LEVEL_WALL_COUNT; i++) {
+        if (OverlapsBox(LEVEL_WALLS[i], p, r)) return true;
+    }
+    for (int i = 0; i < LEVEL_DOOR_COUNT; i++) {
+        if (!g->zone_open[LEVEL_DOORS[i].opens_zone] && OverlapsBox(LEVEL_DOORS[i].box, p, r)) return true;
+    }
+    for (int i = 0; i < LEVEL_INTERACTABLE_COUNT; i++) {
+        if (LEVEL_INTERACTABLES[i].solid && OverlapsBox(LEVEL_INTERACTABLES[i].box, p, r)) return true;
+    }
+    return false;
+}
+
+static bool IsZoneZeroSpawn(Vector3 pos)
+{
+    for (int i = 0; i < LEVEL_SPAWN_COUNT; i++) {
+        if (LEVEL_SPAWNS[i].zone == 0 && LEVEL_SPAWNS[i].pos.x == pos.x && LEVEL_SPAWNS[i].pos.z == pos.z) return true;
+    }
+    return false;
+}
+
+static void TestIntermissionAndSpawning(void)
+{
+    GameState g;
+    GameInit(&g, 5);
+    FrameInput idle = {0};
+    float elapsed = 0.0f;
+    bool zombie_during_intermission = false;
+
+    while (g.phase == PHASE_INTERMISSION && elapsed < INTERMISSION_TIME + 1.0f) {
+        GameUpdate(&g, &idle, DT);
+        elapsed += DT;
+        zombie_during_intermission = zombie_during_intermission || GameAliveZombies(&g) > 0;
+    }
+    CHECK(g.phase == PHASE_ROUND_ACTIVE, "phase=%d after %.2fs", (int)g.phase, (double)elapsed);
+    CHECK(fabsf(elapsed - INTERMISSION_TIME) < 2.0f * DT, "intermission lasted %.3fs", (double)elapsed);
+    CHECK(!zombie_during_intermission, "no zombie may exist during intermission");
+    CHECK(g.zombies_left_to_spawn == 6, "round 1 spawn budget=%d", g.zombies_left_to_spawn);
+
+    int spawned = 0;
+    bool all_in_zone_zero = true;
+    Vector3 first_pos = {0};
+    for (float t = 0.0f; t < 14.0f; t += DT) {
+        ZombieState before[MAX_ZOMBIES];
+        for (int i = 0; i < MAX_ZOMBIES; i++) before[i] = g.zombies[i].state;
+        g.player.health = g.player.max_health;
+        GameUpdate(&g, &idle, DT);
+        for (int i = 0; i < MAX_ZOMBIES; i++) {
+            if (before[i] != ZOMBIE_FREE || g.zombies[i].state == ZOMBIE_FREE) continue;
+            if (spawned == 0) first_pos = g.zombies[i].pos;
+            spawned++;
+            all_in_zone_zero = all_in_zone_zero && g.zombies[i].zone == 0 && IsZoneZeroSpawn(g.zombies[i].pos);
+        }
+    }
+    CHECK(spawned == 6, "spawned=%d", spawned);
+    CHECK(g.zombies_left_to_spawn == 0, "zombies_left_to_spawn=%d", g.zombies_left_to_spawn);
+    CHECK(all_in_zone_zero, "every spawn must be a zone 0 spawn point while zone 1 is closed (first at %.1f,%.1f)",
+          (double)first_pos.x, (double)first_pos.z);
+}
+
+static void TestRoundProgression(void)
+{
+    GameState g;
+    GameInit(&g, 11);
+    FrameInput idle = {0};
+    while (g.phase == PHASE_INTERMISSION) GameUpdate(&g, &idle, DT);
+    int round1_count = g.zombies_left_to_spawn;
+    float round1_health = 0.0f;
+
+    for (int i = 0; i < 60 * 120 && g.phase == PHASE_ROUND_ACTIVE; i++) {
+        g.player.health = g.player.max_health;
+        ShootNearest(&g);
+        for (int k = 0; k < MAX_ZOMBIES && round1_health == 0.0f; k++) {
+            if (g.zombies[k].state == ZOMBIE_CHASE) round1_health = g.zombies[k].max_health;
+        }
+    }
+    CHECK(g.phase == PHASE_INTERMISSION, "phase=%d after clearing round 1", (int)g.phase);
+    CHECK(g.round_number == 2, "round_number=%d", g.round_number);
+    CHECK(g.kills == round1_count, "kills=%d expected %d", g.kills, round1_count);
+    CHECK(GameAliveZombies(&g) == 0, "alive=%d", GameAliveZombies(&g));
+
+    while (g.phase == PHASE_INTERMISSION) GameUpdate(&g, &idle, DT);
+    CHECK(g.zombies_left_to_spawn > round1_count, "round 2 count=%d round 1 count=%d", g.zombies_left_to_spawn, round1_count);
+    float round2_health = 0.0f;
+    for (int i = 0; i < 60 * 5 && round2_health == 0.0f; i++) {
+        GameUpdate(&g, &idle, DT);
+        for (int k = 0; k < MAX_ZOMBIES; k++) {
+            if (g.zombies[k].state == ZOMBIE_CHASE) round2_health = g.zombies[k].max_health;
+        }
+    }
+    CHECK(round2_health > round1_health, "round 2 health=%.1f round 1 health=%.1f", (double)round2_health, (double)round1_health);
+}
+
+static void TestZombiesStayOutOfWalls(void)
+{
+    GameState g;
+    GameInit(&g, 21);
+    g.phase = PHASE_ROUND_ACTIVE;
+    g.zombies_left_to_spawn = 20;
+    FrameInput circle = {.move = {0.0f, 1.0f}, .look = {0.02f, 0.0f}};
+    int violations = 0;
+    int peak_alive = 0;
+    Vector3 where = {0};
+
+    for (int i = 0; i < 60 * 60; i++) {
+        g.player.health = g.player.max_health;
+        GameUpdate(&g, &circle, DT);
+        if (InsideSolid(&g, g.player.pos, PLAYER_RADIUS - 0.001f)) {
+            violations++;
+            where = g.player.pos;
+        }
+        for (int k = 0; k < MAX_ZOMBIES; k++) {
+            if (g.zombies[k].state == ZOMBIE_FREE || !InsideSolid(&g, g.zombies[k].pos, ZOMBIE_RADIUS - 0.001f)) continue;
+            violations++;
+            where = g.zombies[k].pos;
+        }
+        if (GameAliveZombies(&g) > peak_alive) peak_alive = GameAliveZombies(&g);
+    }
+    CHECK(violations == 0, "%d samples inside a wall, last at %.2f,%.2f", violations, (double)where.x, (double)where.z);
+    CHECK(peak_alive >= 10, "the stress run needs a crowd, peak_alive=%d", peak_alive);
+}
+
+typedef struct CrossingCase {
+    const char *name;
+    Vector3 zombie_start;
+    Vector3 player_pos;
+} CrossingCase;
+
+static void TestZombiesCrossTheDoorway(void)
+{
+    const CrossingCase cases[] = {
+        {"front room to back room", {-8.0f, 0.0f, 12.0f}, {0.0f, 0.0f, -10.0f}},
+        {"back room to front room", {8.0f, 0.0f, -14.0f}, {-5.0f, 0.0f, 5.0f}},
+        {"hugging the partition from the front", {-9.0f, 0.0f, 1.2f}, {0.0f, 0.0f, -10.0f}},
+        {"hugging the partition from the back", {9.0f, 0.0f, -1.2f}, {0.0f, 0.0f, 10.0f}},
+    };
+    FrameInput idle = {0};
+
+    for (size_t c = 0; c < sizeof cases / sizeof cases[0]; c++) {
+        GameState g = NewActiveGame();
+        g.zone_open[1] = true;
+        g.player.pos = cases[c].player_pos;
+        Zombie *z = PlaceZombie(&g, cases[c].zombie_start, 150.0f);
+        int violations = 0;
+        for (int i = 0; i < 60 * 45; i++) {
+            GameUpdate(&g, &idle, DT);
+            violations += InsideSolid(&g, z->pos, ZOMBIE_RADIUS - 0.001f);
+        }
+        float dx = z->pos.x - g.player.pos.x;
+        float dz = z->pos.z - g.player.pos.z;
+        CHECK(violations == 0, "%s: %d samples inside a wall", cases[c].name, violations);
+        CHECK(z->zone == g.player_zone && sqrtf(dx * dx + dz * dz) < 1.2f,
+              "%s: zombie must reach the player, zone=%d pos=%.1f,%.1f", cases[c].name, z->zone, (double)z->pos.x, (double)z->pos.z);
+    }
+}
+
 int main(void)
 {
     TestInit();
     TestShootingAndReload();
     TestHeadshotAndWalls();
+    TestIntermissionAndSpawning();
+    TestRoundProgression();
+    TestZombiesStayOutOfWalls();
+    TestZombiesCrossTheDoorway();
 
     if (g_failures > 0) {
         fprintf(stderr, "%d of %d checks failed\n", g_failures, g_checks);
