@@ -59,3 +59,7 @@ ctest --test-dir build --output-on-failure
 - `src/render.c` draws the scene and HUD from a `const GameState *`.
 - `src/main.c` reads input, runs the fixed-step loop and implements `--smoke`.
 - `tests/game_test.c` is the headless core-loop test.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
