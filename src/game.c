@@ -15,7 +15,6 @@
 #define HEADSHOT_KILL_POINTS 100
 #define HITMARKER_TIME 0.18f
 #define MUZZLE_FLASH_TIME 0.06f
-#define ZOMBIE_HIT_FLASH_TIME 0.12f
 #define STOP_DISTANCE 0.9f
 #define SEPARATION_DISTANCE 0.85f
 #define SEPARATION_SPEED 2.0f
@@ -25,7 +24,6 @@
 #define ATTACK_WINDUP 0.4f
 #define ATTACK_COOLDOWN 1.0f
 #define REGEN_RATE 50.0f
-#define DAMAGE_FLASH_TIME 0.35f
 #define PERK_NAME "Vitality Brew"
 /* Below the 0.6m partition plus both 0.4m body radii, so a zombie cannot hit through the wall. */
 #define ATTACK_RANGE 1.3f

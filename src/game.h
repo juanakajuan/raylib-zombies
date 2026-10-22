@@ -22,6 +22,8 @@
 #define INTERMISSION_TIME 5.0f
 #define REGEN_DELAY 3.0f
 #define RESTART_DELAY 1.5f
+#define DAMAGE_FLASH_TIME 0.35f
+#define ZOMBIE_HIT_FLASH_TIME 0.12f
 #define WALL_HEIGHT 3.5f
 
 typedef struct FrameInput {
