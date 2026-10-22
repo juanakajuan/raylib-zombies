@@ -628,6 +628,37 @@ static void TestWeaponsAndPerk(void)
     CHECK(GameNearestInteractable(&g) != perk_item, "owned perk must not show a prompt");
 }
 
+static void TestSwapCannotShortenTheFireCooldown(void)
+{
+    const float interval = WEAPONS[WEAPON_SHOTGUN].fire_interval;
+    GameState g = NewActiveGame();
+    g.player.slots[1] = (WeaponSlot){WEAPON_SHOTGUN, WEAPONS[WEAPON_SHOTGUN].mag_size, WEAPONS[WEAPON_SHOTGUN].reserve_max};
+    g.player.slot_count = 2;
+    g.player.active = 1;
+    FrameInput fire = {.fire_pressed = true};
+    FrameInput swap = {.swap_pressed = true};
+
+    Press(&g, fire);
+    int shells = g.player.slots[1].mag;
+    Press(&g, swap);
+    Press(&g, swap);
+    CHECK(g.player.active == 1, "two swaps must return to the shotgun, active=%d", g.player.active);
+    float elapsed = 2.0f * DT;
+    while (g.player.slots[1].mag == shells && elapsed < 2.0f) {
+        Press(&g, fire);
+        elapsed += DT;
+    }
+    CHECK(g.player.slots[1].mag == shells - 1, "the shotgun never fired again, mag=%d", g.player.slots[1].mag);
+    CHECK(elapsed >= interval - DT, "double swap fired %.2fs after a shot, fire_interval is %.2fs", (double)elapsed, (double)interval);
+
+    GameState idle = NewActiveGame();
+    idle.player.slots[1] = (WeaponSlot){WEAPON_SHOTGUN, WEAPONS[WEAPON_SHOTGUN].mag_size, WEAPONS[WEAPON_SHOTGUN].reserve_max};
+    idle.player.slot_count = 2;
+    Press(&idle, swap);
+    Press(&idle, fire);
+    CHECK(idle.player.slots[1].mag == WEAPONS[WEAPON_SHOTGUN].mag_size, "a weapon must not fire on the frame it is drawn");
+}
+
 int main(void)
 {
     TestInit();
@@ -642,6 +673,7 @@ int main(void)
     TestZombiesCannotHitThroughThePartition();
     TestDoor();
     TestWeaponsAndPerk();
+    TestSwapCannotShortenTheFireCooldown();
 
     if (g_failures > 0) {
         fprintf(stderr, "%d of %d checks failed\n", g_failures, g_checks);

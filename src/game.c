@@ -324,7 +324,7 @@ static void UpdateWeapon(GameState *g, const FrameInput *in, float dt)
     if (in->swap_pressed && p->slot_count > 1) {
         p->active = (p->active + 1) % p->slot_count;
         p->reload_timer = 0.0f;
-        p->fire_cooldown = SWAP_TIME;
+        p->fire_cooldown = fmaxf(p->fire_cooldown, SWAP_TIME);
     }
     if (in->reload_pressed) StartReload(p);
 
