@@ -562,12 +562,12 @@ bool PlayerHasPerk(const Player *p)
     return p->max_health > PLAYER_BASE_HEALTH;
 }
 
-static bool PlayerOwns(const Player *p, WeaponId id)
+static const WeaponSlot *OwnedSlot(const Player *p, WeaponId id)
 {
     for (int i = 0; i < p->slot_count; i++) {
-        if (p->slots[i].id == id) return true;
+        if (p->slots[i].id == id) return &p->slots[i];
     }
-    return false;
+    return NULL;
 }
 
 static void GiveWeapon(Player *p, WeaponId id)
@@ -576,7 +576,7 @@ static void GiveWeapon(Player *p, WeaponId id)
     for (int i = 0; i < p->slot_count; i++) {
         if (p->slots[i].id == id) slot = i;
     }
-    if (!PlayerOwns(p, id) && p->slot_count < MAX_SLOTS) slot = p->slot_count++;
+    if (OwnedSlot(p, id) == NULL && p->slot_count < MAX_SLOTS) slot = p->slot_count++;
     p->slots[slot] = (WeaponSlot){id, WEAPONS[id].mag_size, WEAPONS[id].reserve_max};
     p->active = slot;
     p->reload_timer = 0.0f;
@@ -589,9 +589,10 @@ InteractionInfo GameDescribeInteractable(const GameState *g, int index)
     switch (it->kind) {
     case INTERACT_WALL_BUY: {
         WeaponId id = (WeaponId)it->payload;
-        info.active = true;
+        const WeaponSlot *owned = OwnedSlot(&g->player, id);
+        info.active = owned == NULL || owned->mag < WEAPONS[id].mag_size || owned->reserve < WEAPONS[id].reserve_max;
         info.cost = WEAPONS[id].wall_cost;
-        info.verb = PlayerOwns(&g->player, id) ? "refill ammo for" : "buy";
+        info.verb = owned != NULL ? "refill ammo for" : "buy";
         info.subject = WEAPONS[id].name;
         break;
     }

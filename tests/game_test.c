@@ -659,6 +659,39 @@ static void TestSwapCannotShortenTheFireCooldown(void)
     CHECK(idle.player.slots[1].mag == WEAPONS[WEAPON_SHOTGUN].mag_size, "a weapon must not fire on the frame it is drawn");
 }
 
+static void TestFullAmmoRefillIsNotSold(void)
+{
+    int smg_item = FindInteractable(INTERACT_WALL_BUY, WEAPON_SMG);
+    FrameInput interact = {.interact_pressed = true};
+    FrameInput fire = {.fire_held = true};
+    FrameInput idle = {0};
+    GameState g = NewActiveGame();
+
+    StandNear(&g, smg_item);
+    g.player.points = WEAPONS[WEAPON_SMG].wall_cost + 500;
+    Press(&g, interact);
+    CHECK(g.player.slot_count == 2 && g.player.points == 500, "SMG purchase, slots=%d points=%d", g.player.slot_count, g.player.points);
+
+    g.player.points = 5000;
+    Press(&g, interact);
+    CHECK(g.player.points == 5000, "a full SMG must not be refilled for points, points=%d", g.player.points);
+    CHECK(GameNearestInteractable(&g) != smg_item, "no prompt may offer ammo that is already full");
+
+    g.player.slots[1].reserve--;
+    CHECK(GameNearestInteractable(&g) == smg_item, "missing reserve ammo must bring the prompt back");
+    Press(&g, interact);
+    CHECK(g.player.points == 5000 - WEAPONS[WEAPON_SMG].wall_cost && g.player.slots[1].reserve == WEAPONS[WEAPON_SMG].reserve_max,
+          "refill points=%d reserve=%d", g.player.points, g.player.slots[1].reserve);
+
+    for (int i = 0; i < 30; i++) Press(&g, idle);
+    Press(&g, fire);
+    CHECK(g.player.slots[1].mag == WEAPONS[WEAPON_SMG].mag_size - 1, "one round fired, mag=%d", g.player.slots[1].mag);
+    int points = g.player.points;
+    Press(&g, interact);
+    CHECK(g.player.points == points - WEAPONS[WEAPON_SMG].wall_cost && g.player.slots[1].mag == WEAPONS[WEAPON_SMG].mag_size,
+          "an empty magazine slot must be refillable, points=%d mag=%d", g.player.points, g.player.slots[1].mag);
+}
+
 int main(void)
 {
     TestInit();
@@ -674,6 +707,7 @@ int main(void)
     TestDoor();
     TestWeaponsAndPerk();
     TestSwapCannotShortenTheFireCooldown();
+    TestFullAmmoRefillIsNotSold();
 
     if (g_failures > 0) {
         fprintf(stderr, "%d of %d checks failed\n", g_failures, g_checks);
