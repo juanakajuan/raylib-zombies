@@ -72,7 +72,7 @@ const SpawnPoint LEVEL_SPAWNS[] = {
     {{-8.5f, 0.0f, 2.0f}, 0},
     {{8.5f, 0.0f, 2.0f}, 0},
     {{-8.5f, 0.0f, 12.5f}, 0},
-    {{8.5f, 0.0f, 12.5f}, 0},
+    {{8.5f, 0.0f, 11.0f}, 0},
     {{-8.5f, 0.0f, -14.5f}, 1},
     {{0.0f, 0.0f, -14.5f}, 1},
     {{8.5f, 0.0f, -14.5f}, 1},
@@ -85,7 +85,7 @@ const Interactable LEVEL_INTERACTABLES[] = {
     {INTERACT_WALL_BUY, {{-10.0f, 0.9f, 5.6f}, {-9.88f, 2.3f, 8.4f}}, false, 2.6f, WEAPON_SMG},
     {INTERACT_WALL_BUY, {{9.88f, 0.9f, 6.6f}, {10.0f, 2.3f, 9.4f}}, false, 2.6f, WEAPON_SHOTGUN},
     {INTERACT_DOOR, DOOR_BOX, false, 3.0f, 0},
-    {INTERACT_PERK, {{5.4f, 0.0f, 12.7f}, {7.0f, 2.4f, 14.0f}}, true, 2.6f, 2500},
+    {INTERACT_PERK, {{8.4f, 0.0f, 12.7f}, {10.0f, 2.4f, 14.0f}}, true, 2.6f, 2500},
 };
 const int LEVEL_INTERACTABLE_COUNT = (int)(sizeof LEVEL_INTERACTABLES / sizeof LEVEL_INTERACTABLES[0]);
 

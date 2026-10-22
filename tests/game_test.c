@@ -334,6 +334,49 @@ static void TestZombiesCrossTheDoorway(void)
     }
 }
 
+#define REACH_STEP 0.5f
+#define REACH_BUDGET_SECONDS 90
+
+static bool ZombieHurtsPlayer(const GameState *start, int spawn, Vector3 *stuck_at)
+{
+    GameState g = *start;
+    Zombie *z = PlaceZombie(&g, LEVEL_SPAWNS[spawn].pos, 150.0f);
+    FrameInput idle = {0};
+    for (int i = 0; i < REACH_BUDGET_SECONDS * 60 && g.player.health == start->player.health; i++) GameUpdate(&g, &idle, DT);
+    *stuck_at = z->pos;
+    return g.player.health < start->player.health;
+}
+
+static void TestEveryZombieReachesEveryPlayerSpot(void)
+{
+    int runs = 0;
+    int stuck = 0;
+    char first[160] = "";
+
+    for (int door_open = 0; door_open <= 1; door_open++) {
+        for (float x = -10.0f; x <= 10.0f; x += REACH_STEP) {
+            for (float z = -16.0f; z <= 14.0f; z += REACH_STEP) {
+                GameState g = NewActiveGame();
+                g.zone_open[1] = door_open;
+                g.player.pos = (Vector3){fminf(fmaxf(x, -9.55f), 9.55f), 0.0f, fminf(fmaxf(z, -15.55f), 13.55f)};
+                if (GameBlocked(&g, g.player.pos, PLAYER_RADIUS) || (!door_open && g.player.pos.z < 0.0f)) continue;
+                for (int s = 0; s < LEVEL_SPAWN_COUNT; s++) {
+                    Vector3 stuck_at;
+                    if (!g.zone_open[LEVEL_SPAWNS[s].zone]) continue;
+                    runs++;
+                    if (ZombieHurtsPlayer(&g, s, &stuck_at)) continue;
+                    if (stuck++ == 0) {
+                        snprintf(first, sizeof first, "door_open=%d player=%.2f,%.2f spawn=%d stuck at %.2f,%.2f", door_open,
+                                 (double)g.player.pos.x, (double)g.player.pos.z, s, (double)stuck_at.x, (double)stuck_at.z);
+                    }
+                }
+            }
+        }
+    }
+    CHECK(runs > 10000, "the sweep must cover the level, runs=%d", runs);
+    CHECK(stuck == 0, "%d of %d chasing zombies never reached the player, first: %s", stuck, runs, first);
+}
+
 static void TestDamageRegenAndGameOver(void)
 {
     GameState g = NewActiveGame();
@@ -594,6 +637,7 @@ int main(void)
     TestRoundProgression();
     TestZombiesStayOutOfWalls();
     TestZombiesCrossTheDoorway();
+    TestEveryZombieReachesEveryPlayerSpot();
     TestDamageRegenAndGameOver();
     TestZombiesCannotHitThroughThePartition();
     TestDoor();
