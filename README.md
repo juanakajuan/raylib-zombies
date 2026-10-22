@@ -5,6 +5,10 @@ Survive rounds of zombies, earn points by shooting them, and spend points on a d
 
 ## Build and run
 
+`./run.sh` builds the game if needed and then starts it. It passes its arguments to the game, as in `./run.sh --smoke`.
+
+To do the steps by hand:
+
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
