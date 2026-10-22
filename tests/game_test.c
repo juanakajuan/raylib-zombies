@@ -410,6 +410,181 @@ static void TestZombiesCannotHitThroughThePartition(void)
     CHECK(!hit_through_wall, "a zombie in the back room hurt a player in the front room");
 }
 
+static int FindInteractable(InteractKind kind, int payload)
+{
+    for (int i = 0; i < LEVEL_INTERACTABLE_COUNT; i++) {
+        if (LEVEL_INTERACTABLES[i].kind == kind && (payload < 0 || LEVEL_INTERACTABLES[i].payload == payload)) return i;
+    }
+    return -1;
+}
+
+static void StandNear(GameState *g, int interactable)
+{
+    Vector3 center = BoxCenter(LEVEL_INTERACTABLES[interactable].box);
+    float dx = 0.0f - center.x;
+    float dz = 7.0f - center.z;
+    float length = sqrtf(dx * dx + dz * dz);
+    g->player.pos = (Vector3){center.x + dx / length * 1.5f, 0.0f, center.z + dz / length * 1.5f};
+}
+
+static void Press(GameState *g, FrameInput in)
+{
+    GameUpdate(g, &in, DT);
+}
+
+static void TestDoor(void)
+{
+    int door_item = FindInteractable(INTERACT_DOOR, -1);
+    const Door *door = &LEVEL_DOORS[LEVEL_INTERACTABLES[door_item].payload];
+    Vector3 door_center = BoxCenter(door->box);
+    FrameInput interact = {.interact_pressed = true};
+    FrameInput fire = {.fire_pressed = true};
+    FrameInput idle = {0};
+
+    GameState g = NewActiveGame();
+    Zombie *behind = PlaceZombie(&g, (Vector3){0.0f, 0.0f, -4.0f}, 150.0f);
+    StandNear(&g, door_item);
+    AimAt(&g.player, (Vector3){behind->pos.x, 0.7f, behind->pos.z});
+
+    g.player.points = door->cost - 1;
+    Press(&g, interact);
+    CHECK(g.player.points == door->cost - 1, "points=%d, buying without enough points must do nothing", g.player.points);
+    CHECK(!g.zone_open[1], "door opened without enough points");
+
+    g.player.pos = (Vector3){0.0f, 0.0f, 10.0f};
+    g.player.points = door->cost * 3;
+    Press(&g, interact);
+    CHECK(g.player.points == door->cost * 3 && !g.zone_open[1], "door bought from out of range");
+
+    StandNear(&g, door_item);
+    CHECK(GameBlocked(&g, door_center, 0.1f), "closed door must block movement");
+    AimAt(&g.player, (Vector3){behind->pos.x, 0.7f, behind->pos.z});
+    Press(&g, fire);
+    CHECK(behind->health == 150.0f, "closed door must stop bullets, health=%.1f", (double)behind->health);
+
+    g.player.points = door->cost;
+    Press(&g, interact);
+    CHECK(g.player.points == 0, "points=%d after buying the door", g.player.points);
+    CHECK(g.zone_open[1], "zone 1 should be open");
+    CHECK(!GameBlocked(&g, door_center, 0.1f), "open door must stop blocking movement");
+    for (int i = 0; i < 30; i++) Press(&g, idle);
+    AimAt(&g.player, (Vector3){behind->pos.x, 0.7f, behind->pos.z});
+    Press(&g, fire);
+    CHECK(behind->health < 150.0f, "bullets must pass the open doorway, health=%.1f", (double)behind->health);
+
+    GameState walker = NewActiveGame();
+    walker.zone_open[1] = true;
+    walker.player.pos = (Vector3){0.0f, 0.0f, 3.0f};
+    FrameInput forward = {.move = {0.0f, 1.0f}};
+    for (int i = 0; i < 60 * 2; i++) GameUpdate(&walker, &forward, DT);
+    CHECK(walker.player.pos.z < -2.0f && walker.player_zone == 1, "player stuck at z=%.2f zone=%d", (double)walker.player.pos.z, walker.player_zone);
+
+    GameState sealed = NewActiveGame();
+    sealed.player.pos = (Vector3){0.0f, 0.0f, 3.0f};
+    for (int i = 0; i < 60 * 2; i++) GameUpdate(&sealed, &forward, DT);
+    CHECK(sealed.player.pos.z > 0.0f && sealed.player_zone == 0, "closed door let the player through, z=%.2f", (double)sealed.player.pos.z);
+
+    GameState spawner = NewActiveGame();
+    spawner.zone_open[1] = true;
+    spawner.zombies_left_to_spawn = 24;
+    bool zone_seen[ZONE_COUNT] = {false};
+    for (int i = 0; i < 60 * 45; i++) {
+        ZombieState before[MAX_ZOMBIES];
+        for (int k = 0; k < MAX_ZOMBIES; k++) before[k] = spawner.zombies[k].state;
+        spawner.player.health = spawner.player.max_health;
+        GameUpdate(&spawner, &idle, DT);
+        for (int k = 0; k < MAX_ZOMBIES; k++) {
+            if (before[k] == ZOMBIE_FREE && spawner.zombies[k].state != ZOMBIE_FREE) zone_seen[spawner.zombies[k].zone] = true;
+        }
+    }
+    CHECK(zone_seen[0] && zone_seen[1], "spawns seen per zone: %d,%d", zone_seen[0], zone_seen[1]);
+}
+
+static void TestWeaponsAndPerk(void)
+{
+    int smg_item = FindInteractable(INTERACT_WALL_BUY, WEAPON_SMG);
+    int shotgun_item = FindInteractable(INTERACT_WALL_BUY, WEAPON_SHOTGUN);
+    int perk_item = FindInteractable(INTERACT_PERK, -1);
+    FrameInput interact = {.interact_pressed = true};
+    FrameInput swap = {.swap_pressed = true};
+    FrameInput idle = {0};
+    GameState g = NewActiveGame();
+
+    StandNear(&g, smg_item);
+    g.player.points = WEAPONS[WEAPON_SMG].wall_cost - 1;
+    Press(&g, interact);
+    CHECK(g.player.slot_count == 1 && g.player.points == WEAPONS[WEAPON_SMG].wall_cost - 1, "SMG bought with too few points");
+
+    g.player.points = WEAPONS[WEAPON_SMG].wall_cost;
+    Press(&g, interact);
+    CHECK(g.player.points == 0, "points=%d", g.player.points);
+    CHECK(g.player.slot_count == 2 && g.player.slots[1].id == WEAPON_SMG, "slot_count=%d", g.player.slot_count);
+    CHECK(g.player.active == 1, "bought weapon should be active, active=%d", g.player.active);
+    CHECK(g.player.slots[1].mag == WEAPONS[WEAPON_SMG].mag_size && g.player.slots[1].reserve == WEAPONS[WEAPON_SMG].reserve_max,
+          "SMG ammo=%d/%d", g.player.slots[1].mag, g.player.slots[1].reserve);
+
+    for (int i = 0; i < 20; i++) Press(&g, idle);
+    Press(&g, swap);
+    CHECK(g.player.active == 0, "swap should select the pistol, active=%d", g.player.active);
+    for (int i = 0; i < 30; i++) Press(&g, idle);
+    Press(&g, swap);
+    CHECK(g.player.active == 1, "swap should return to the SMG, active=%d", g.player.active);
+
+    Zombie *target = PlaceZombie(&g, (Vector3){0.0f, 0.0f, 4.0f}, 9000.0f);
+    g.player.pos = (Vector3){0.0f, 0.0f, 10.0f};
+    for (int i = 0; i < 30; i++) Press(&g, idle);
+    int mag_before = g.player.slots[1].mag;
+    FrameInput hold = {.fire_held = true};
+    for (int i = 0; i < 60; i++) {
+        AimAt(&g.player, (Vector3){target->pos.x, 0.7f, target->pos.z});
+        GameUpdate(&g, &hold, DT);
+    }
+    int expected = (int)(1.0f / WEAPONS[WEAPON_SMG].fire_interval);
+    int fired = mag_before - g.player.slots[1].mag;
+    CHECK(abs(fired - expected) <= 1, "automatic fire shot %d in one second, table says about %d", fired, expected);
+
+    StandNear(&g, shotgun_item);
+    g.player.points = WEAPONS[WEAPON_SHOTGUN].wall_cost;
+    Press(&g, interact);
+    CHECK(g.player.slot_count == 2 && g.player.slots[1].id == WEAPON_SHOTGUN && g.player.slots[0].id == WEAPON_PISTOL,
+          "third weapon must replace the active slot, slots=%d,%d", (int)g.player.slots[0].id, (int)g.player.slots[1].id);
+
+    g.player.pos = (Vector3){0.0f, 0.0f, 10.0f};
+    for (int i = 0; i < 60; i++) Press(&g, idle);
+    target->health = 9000.0f;
+    AimAt(&g.player, (Vector3){target->pos.x, 0.7f, target->pos.z});
+    int points_before = g.player.points;
+    Press(&g, (FrameInput){.fire_pressed = true});
+    CHECK(g.player.slots[1].mag == WEAPONS[WEAPON_SHOTGUN].mag_size - 1, "one trigger pull uses one shell, mag=%d", g.player.slots[1].mag);
+    int pellet_hits = g.player.points - points_before;
+    CHECK(pellet_hits >= 30 && pellet_hits <= 10 * WEAPONS[WEAPON_SHOTGUN].pellets, "pellet hit points=%d", pellet_hits);
+    CHECK(target->health <= 9000.0f - 3.0f * WEAPONS[WEAPON_SHOTGUN].damage, "shotgun damage left health=%.1f", (double)target->health);
+
+    StandNear(&g, shotgun_item);
+    g.player.slots[1].mag = 0;
+    g.player.slots[1].reserve = 0;
+    g.player.points = WEAPONS[WEAPON_SHOTGUN].wall_cost;
+    Press(&g, interact);
+    CHECK(g.player.slot_count == 2 && g.player.points == 0, "refill should cost the wall price, points=%d", g.player.points);
+    CHECK(g.player.slots[1].mag == WEAPONS[WEAPON_SHOTGUN].mag_size && g.player.slots[1].reserve == WEAPONS[WEAPON_SHOTGUN].reserve_max,
+          "refilled ammo=%d/%d", g.player.slots[1].mag, g.player.slots[1].reserve);
+
+    StandNear(&g, perk_item);
+    g.player.health = 30.0f;
+    g.player.points = 2499;
+    Press(&g, interact);
+    CHECK(!PlayerHasPerk(&g.player) && g.player.points == 2499, "perk bought with 2499 points");
+    g.player.points = LEVEL_INTERACTABLES[perk_item].payload;
+    Press(&g, interact);
+    CHECK(g.player.max_health == PERK_MAX_HEALTH, "max_health=%.1f", (double)g.player.max_health);
+    CHECK(g.player.health == PERK_MAX_HEALTH, "perk should heal to the new max, health=%.1f", (double)g.player.health);
+    CHECK(g.player.points == 0, "points=%d", g.player.points);
+    g.player.points = 5000;
+    Press(&g, interact);
+    CHECK(g.player.points == 5000, "a second perk purchase must be refused, points=%d", g.player.points);
+    CHECK(GameNearestInteractable(&g) != perk_item, "owned perk must not show a prompt");
+}
+
 int main(void)
 {
     TestInit();
@@ -421,6 +596,8 @@ int main(void)
     TestZombiesCrossTheDoorway();
     TestDamageRegenAndGameOver();
     TestZombiesCannotHitThroughThePartition();
+    TestDoor();
+    TestWeaponsAndPerk();
 
     if (g_failures > 0) {
         fprintf(stderr, "%d of %d checks failed\n", g_failures, g_checks);

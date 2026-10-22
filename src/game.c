@@ -26,6 +26,7 @@
 #define ATTACK_COOLDOWN 1.0f
 #define REGEN_RATE 50.0f
 #define DAMAGE_FLASH_TIME 0.35f
+#define PERK_NAME "Vitality Brew"
 /* Below the 0.6m partition plus both 0.4m body radii, so a zombie cannot hit through the wall. */
 #define ATTACK_RANGE 1.3f
 #define DOOR_BOX {{-1.5f, 0.0f, -0.3f}, {1.5f, WALL_HEIGHT, 0.3f}}
@@ -558,6 +559,103 @@ static void UpdateRound(GameState *g, float dt)
     }
 }
 
+bool PlayerHasPerk(const Player *p)
+{
+    return p->max_health > PLAYER_BASE_HEALTH;
+}
+
+static bool PlayerOwns(const Player *p, WeaponId id)
+{
+    for (int i = 0; i < p->slot_count; i++) {
+        if (p->slots[i].id == id) return true;
+    }
+    return false;
+}
+
+static void GiveWeapon(Player *p, WeaponId id)
+{
+    int slot = p->active;
+    for (int i = 0; i < p->slot_count; i++) {
+        if (p->slots[i].id == id) slot = i;
+    }
+    if (!PlayerOwns(p, id) && p->slot_count < MAX_SLOTS) slot = p->slot_count++;
+    p->slots[slot] = (WeaponSlot){id, WEAPONS[id].mag_size, WEAPONS[id].reserve_max};
+    p->active = slot;
+    p->reload_timer = 0.0f;
+}
+
+InteractionInfo GameDescribeInteractable(const GameState *g, int index)
+{
+    const Interactable *it = &LEVEL_INTERACTABLES[index];
+    InteractionInfo info = {0};
+    switch (it->kind) {
+    case INTERACT_WALL_BUY: {
+        WeaponId id = (WeaponId)it->payload;
+        info.active = true;
+        info.cost = WEAPONS[id].wall_cost;
+        info.verb = PlayerOwns(&g->player, id) ? "refill ammo for" : "buy";
+        info.subject = WEAPONS[id].name;
+        break;
+    }
+    case INTERACT_DOOR:
+        info.active = !g->zone_open[LEVEL_DOORS[it->payload].opens_zone];
+        info.cost = LEVEL_DOORS[it->payload].cost;
+        info.verb = "open";
+        info.subject = "the door";
+        break;
+    case INTERACT_PERK:
+        info.active = !PlayerHasPerk(&g->player);
+        info.cost = it->payload;
+        info.verb = "drink";
+        info.subject = PERK_NAME;
+        break;
+    }
+    return info;
+}
+
+static void ApplyInteraction(GameState *g, const Interactable *it)
+{
+    switch (it->kind) {
+    case INTERACT_WALL_BUY:
+        GiveWeapon(&g->player, (WeaponId)it->payload);
+        break;
+    case INTERACT_DOOR:
+        g->zone_open[LEVEL_DOORS[it->payload].opens_zone] = true;
+        break;
+    case INTERACT_PERK:
+        g->player.max_health = PERK_MAX_HEALTH;
+        g->player.health = PERK_MAX_HEALTH;
+        break;
+    }
+}
+
+int GameNearestInteractable(const GameState *g)
+{
+    int nearest = -1;
+    float best = INFINITY;
+    for (int i = 0; i < LEVEL_INTERACTABLE_COUNT; i++) {
+        if (!GameDescribeInteractable(g, i).active) continue;
+        Vector3 center = BoxCenter(LEVEL_INTERACTABLES[i].box);
+        float distance = hypotf(center.x - g->player.pos.x, center.z - g->player.pos.z);
+        if (distance <= LEVEL_INTERACTABLES[i].radius && distance < best) {
+            best = distance;
+            nearest = i;
+        }
+    }
+    return nearest;
+}
+
+static void UpdateInteraction(GameState *g, const FrameInput *in)
+{
+    if (!in->interact_pressed) return;
+    int index = GameNearestInteractable(g);
+    if (index < 0) return;
+    int cost = GameDescribeInteractable(g, index).cost;
+    if (g->player.points < cost) return;
+    g->player.points -= cost;
+    ApplyInteraction(g, &LEVEL_INTERACTABLES[index]);
+}
+
 void GameUpdate(GameState *g, const FrameInput *in, float dt)
 {
     g->phase_timer += dt;
@@ -566,6 +664,7 @@ void GameUpdate(GameState *g, const FrameInput *in, float dt)
         return;
     }
     UpdateMovement(g, in, dt);
+    UpdateInteraction(g, in);
     UpdateWeapon(g, in, dt);
     for (int i = 0; i < MAX_ZOMBIES; i++) UpdateZombie(g, i, dt);
     UpdateHealth(g, dt);

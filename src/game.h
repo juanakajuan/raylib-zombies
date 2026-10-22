@@ -177,6 +177,9 @@ void GameUpdate(GameState *g, const FrameInput *in, float dt);
 
 bool GameBlocked(const GameState *g, Vector3 pos, float radius);
 int GameAliveZombies(const GameState *g);
+int GameNearestInteractable(const GameState *g);
+InteractionInfo GameDescribeInteractable(const GameState *g, int index);
+bool PlayerHasPerk(const Player *p);
 Vector3 PlayerEye(const Player *p);
 Vector3 PlayerForward(const Player *p);
 BoundingBox ZombieBodyBox(const Zombie *z);
