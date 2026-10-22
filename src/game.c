@@ -29,6 +29,7 @@
 #define ATTACK_RANGE 1.3f
 #define DOOR_BOX {{-1.5f, 0.0f, -0.3f}, {1.5f, WALL_HEIGHT, 0.3f}}
 #define DEFAULT_SEED 0x9E3779B9u
+#define PLAYER_MOVER (-1)
 
 const WeaponDef WEAPONS[WEAPON_COUNT] = {
     [WEAPON_PISTOL] = {
@@ -185,14 +186,38 @@ bool GameBlocked(const GameState *g, Vector3 pos, float radius)
     return false;
 }
 
-static Vector3 SlideMove(const GameState *g, Vector3 pos, Vector3 delta, float radius)
+static bool ZombieTargetable(const Zombie *z)
 {
-    Vector3 next = pos;
-    next.x += delta.x;
-    if (GameBlocked(g, next, radius)) next.x = pos.x;
-    next.z += delta.z;
-    if (GameBlocked(g, next, radius)) next.z = pos.z;
-    return next;
+    return z->state == ZOMBIE_CHASE || z->state == ZOMBIE_ATTACK;
+}
+
+/* A step is refused only when it closes on a body already within touching distance, so overlapping bodies can still part. */
+static bool StepsIntoBody(Vector3 from, Vector3 to, Vector3 other)
+{
+    float before = hypotf(from.x - other.x, from.z - other.z);
+    float after = hypotf(to.x - other.x, to.z - other.z);
+    return after < PLAYER_RADIUS + ZOMBIE_RADIUS && after < before;
+}
+
+/* mover is PLAYER_MOVER or the index of the zombie that moves. */
+static bool MoveBlocked(const GameState *g, Vector3 from, Vector3 to, int mover)
+{
+    if (mover != PLAYER_MOVER) return GameBlocked(g, to, ZOMBIE_RADIUS) || StepsIntoBody(from, to, g->player.pos);
+    if (GameBlocked(g, to, PLAYER_RADIUS)) return true;
+    for (int i = 0; i < MAX_ZOMBIES; i++) {
+        if (ZombieTargetable(&g->zombies[i]) && StepsIntoBody(from, to, g->zombies[i].pos)) return true;
+    }
+    return false;
+}
+
+static Vector3 SlideMove(const GameState *g, Vector3 pos, Vector3 delta, int mover)
+{
+    Vector3 trial = {pos.x + delta.x, pos.y, pos.z};
+    if (MoveBlocked(g, pos, trial, mover)) trial.x = pos.x;
+    Vector3 from = trial;
+    trial.z += delta.z;
+    if (MoveBlocked(g, from, trial, mover)) trial.z = from.z;
+    return trial;
 }
 
 static int ZoneAt(Vector3 pos, int fallback)
@@ -214,11 +239,6 @@ static float NearestSolidDistance(const GameState *g, Ray ray)
         if (hit.hit && hit.distance < nearest) nearest = hit.distance;
     }
     return nearest;
-}
-
-static bool ZombieTargetable(const Zombie *z)
-{
-    return z->state == ZOMBIE_CHASE || z->state == ZOMBIE_ATTACK;
 }
 
 static void DamageZombie(GameState *g, Zombie *z, float damage, bool headshot)
@@ -348,7 +368,7 @@ static void UpdateMovement(GameState *g, const FrameInput *in, float dt)
     Vector3 right = {cosf(p->yaw), 0.0f, sinf(p->yaw)};
     float speed = in->sprint_held && in->move.y > 0.0f ? SPRINT_SPEED : WALK_SPEED;
     Vector3 wish = Vector3Add(Vector3Scale(forward, in->move.y), Vector3Scale(right, in->move.x));
-    p->pos = SlideMove(g, p->pos, Vector3Scale(wish, speed * dt), PLAYER_RADIUS);
+    p->pos = SlideMove(g, p->pos, Vector3Scale(wish, speed * dt), PLAYER_MOVER);
     g->player_zone = ZoneAt(p->pos, g->player_zone);
 }
 
@@ -499,7 +519,7 @@ static void UpdateZombie(GameState *g, int index, float dt)
 
     Vector3 steer = ZombieSteering(g, z);
     Vector3 velocity = Vector3Add(Vector3Scale(steer, z->speed), Vector3Scale(ZombieSeparation(g, index), SEPARATION_SPEED));
-    z->pos = SlideMove(g, z->pos, Vector3Scale(velocity, dt), ZOMBIE_RADIUS);
+    z->pos = SlideMove(g, z->pos, Vector3Scale(velocity, dt), index);
     z->zone = ZoneAt(z->pos, z->zone);
     if (Vector3LengthSqr(steer) > 0.0f) z->yaw = atan2f(steer.x, -steer.z);
 

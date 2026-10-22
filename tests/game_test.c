@@ -716,6 +716,70 @@ static void TestGameOverLetsDyingZombiesFinishFalling(void)
     CHECK(flashing->hit_flash == 0.0f, "a hit flash stayed red at game over, hit_flash=%.3f", (double)flashing->hit_flash);
 }
 
+#define BODY_CONTACT (PLAYER_RADIUS + ZOMBIE_RADIUS)
+
+static float PlanarDistance(Vector3 a, Vector3 b)
+{
+    return hypotf(a.x - b.x, a.z - b.z);
+}
+
+static void Invulnerable(GameState *g)
+{
+    g->player.max_health = 1e6f;
+    g->player.health = 1e6f;
+}
+
+static void TestPlayerCannotWalkThroughZombies(void)
+{
+    GameState g = NewActiveGame();
+    Invulnerable(&g);
+    Zombie *z = PlaceZombie(&g, (Vector3){0.0f, 0.0f, 7.0f}, 150.0f);
+    FrameInput forward = {.move = {0.0f, 1.0f}};
+    float closest = INFINITY;
+
+    for (int i = 0; i < 60 * 2; i++) {
+        GameUpdate(&g, &forward, DT);
+        closest = fminf(closest, PlanarDistance(g.player.pos, z->pos));
+    }
+    CHECK(closest >= BODY_CONTACT - 0.001f, "player walked into a zombie, closest=%.2f", (double)closest);
+    CHECK(g.player.pos.z > z->pos.z, "player passed through the zombie, player z=%.2f zombie z=%.2f", (double)g.player.pos.z, (double)z->pos.z);
+
+    GameState pinned = NewActiveGame();
+    Invulnerable(&pinned);
+    Zombie *on_top = PlaceZombie(&pinned, (Vector3){0.0f, 0.0f, 9.7f}, 150.0f);
+    FrameInput back = {.move = {0.0f, -1.0f}};
+    for (int i = 0; i < 60; i++) GameUpdate(&pinned, &back, DT);
+    CHECK(PlanarDistance(pinned.player.pos, on_top->pos) >= BODY_CONTACT, "a player overlapping a zombie must be able to walk away, distance=%.2f",
+          (double)PlanarDistance(pinned.player.pos, on_top->pos));
+    CHECK(pinned.player.pos.z > 11.0f, "walking away stalled at z=%.2f", (double)pinned.player.pos.z);
+}
+
+static void TestZombiesNeverStackOnThePlayer(void)
+{
+    GameState g = NewActiveGame();
+    g.player.pos = (Vector3){0.0f, 0.0f, 7.0f};
+    for (int i = 0; i < 14; i++) {
+        float angle = (float)i * 0.9f;
+        float radius = 2.0f + (float)(i % 4);
+        PlaceZombie(&g, (Vector3){radius * sinf(angle), 0.0f, 7.0f + radius * cosf(angle)}, 9000.0f);
+    }
+    FrameInput idle = {0};
+    float closest = INFINITY;
+    bool hurt = false;
+
+    for (int i = 0; i < 60 * 25; i++) {
+        GameUpdate(&g, &idle, DT);
+        hurt = hurt || g.player.health < g.player.max_health;
+        g.player.health = g.player.max_health;
+        for (int k = 0; k < MAX_ZOMBIES; k++) {
+            if (g.zombies[k].state == ZOMBIE_FREE) continue;
+            closest = fminf(closest, PlanarDistance(g.player.pos, g.zombies[k].pos));
+        }
+    }
+    CHECK(closest >= BODY_CONTACT - 0.001f, "a zombie reached %.2fm from the player, bodies touch at %.2fm", (double)closest, (double)BODY_CONTACT);
+    CHECK(hurt, "zombies around the player must still land hits");
+}
+
 int main(void)
 {
     TestInit();
@@ -733,6 +797,8 @@ int main(void)
     TestSwapCannotShortenTheFireCooldown();
     TestFullAmmoRefillIsNotSold();
     TestGameOverLetsDyingZombiesFinishFalling();
+    TestPlayerCannotWalkThroughZombies();
+    TestZombiesNeverStackOnThePlayer();
 
     if (g_failures > 0) {
         fprintf(stderr, "%d of %d checks failed\n", g_failures, g_checks);
