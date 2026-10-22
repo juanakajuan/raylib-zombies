@@ -692,6 +692,30 @@ static void TestFullAmmoRefillIsNotSold(void)
           "an empty magazine slot must be refillable, points=%d mag=%d", g.player.points, g.player.slots[1].mag);
 }
 
+static void TestGameOverLetsDyingZombiesFinishFalling(void)
+{
+    GameState g = NewActiveGame();
+    FrameInput fire = {.fire_pressed = true};
+    FrameInput idle = {0};
+    Zombie *dying = PlaceZombie(&g, (Vector3){0.0f, 0.0f, 4.0f}, 40.0f);
+    Zombie *flashing = PlaceZombie(&g, (Vector3){3.0f, 0.0f, 4.0f}, 150.0f);
+
+    AimAt(&g.player, (Vector3){dying->pos.x, 0.7f, dying->pos.z});
+    Press(&g, fire);
+    for (int i = 0; i < 20; i++) Press(&g, idle);
+    AimAt(&g.player, (Vector3){flashing->pos.x, 0.7f, flashing->pos.z});
+    Press(&g, fire);
+    CHECK(dying->state == ZOMBIE_DYING && flashing->hit_flash > 0.0f, "setup: dying state=%d flash=%.3f", (int)dying->state,
+          (double)flashing->hit_flash);
+
+    g.player.health = 0.0f;
+    g.phase = PHASE_GAME_OVER;
+    g.phase_timer = 0.0f;
+    for (int i = 0; i < 60; i++) Press(&g, idle);
+    CHECK(dying->state == ZOMBIE_FREE, "a dying zombie froze at game over, state=%d timer=%.3f", (int)dying->state, (double)dying->dying_timer);
+    CHECK(flashing->hit_flash == 0.0f, "a hit flash stayed red at game over, hit_flash=%.3f", (double)flashing->hit_flash);
+}
+
 int main(void)
 {
     TestInit();
@@ -708,6 +732,7 @@ int main(void)
     TestWeaponsAndPerk();
     TestSwapCannotShortenTheFireCooldown();
     TestFullAmmoRefillIsNotSold();
+    TestGameOverLetsDyingZombiesFinishFalling();
 
     if (g_failures > 0) {
         fprintf(stderr, "%d of %d checks failed\n", g_failures, g_checks);

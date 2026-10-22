@@ -483,14 +483,18 @@ static Vector3 ZombieSeparation(const GameState *g, int index)
     return push;
 }
 
+static void TickZombieTimers(Zombie *z, float dt)
+{
+    z->hit_flash = fmaxf(0.0f, z->hit_flash - dt);
+    if (z->state != ZOMBIE_DYING) return;
+    z->dying_timer -= dt;
+    if (z->dying_timer <= 0.0f) z->state = ZOMBIE_FREE;
+}
+
 static void UpdateZombie(GameState *g, int index, float dt)
 {
     Zombie *z = &g->zombies[index];
-    z->hit_flash = fmaxf(0.0f, z->hit_flash - dt);
-    if (z->state == ZOMBIE_DYING) {
-        z->dying_timer -= dt;
-        if (z->dying_timer <= 0.0f) z->state = ZOMBIE_FREE;
-    }
+    TickZombieTimers(z, dt);
     if (!ZombieTargetable(z)) return;
 
     Vector3 steer = ZombieSteering(g, z);
@@ -659,6 +663,7 @@ void GameUpdate(GameState *g, const FrameInput *in, float dt)
 {
     g->phase_timer += dt;
     if (g->phase == PHASE_GAME_OVER) {
+        for (int i = 0; i < MAX_ZOMBIES; i++) TickZombieTimers(&g->zombies[i], dt);
         if (in->restart_pressed && g->phase_timer >= RESTART_DELAY) GameInit(g, RngNext(g));
         return;
     }
