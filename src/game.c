@@ -241,6 +241,13 @@ static float NearestSolidDistance(const GameState *g, Ray ray)
     return nearest;
 }
 
+bool GameHasLineOfSight(const GameState *g, Vector3 from, Vector3 to)
+{
+    Vector3 span = Vector3Subtract(to, from);
+    float distance = Vector3Length(span);
+    return NearestSolidDistance(g, (Ray){from, Vector3Scale(span, 1.0f / distance)}) >= distance;
+}
+
 static void DamageZombie(GameState *g, Zombie *z, float damage, bool headshot)
 {
     Player *p = &g->player;

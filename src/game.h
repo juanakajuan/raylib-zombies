@@ -178,6 +178,7 @@ void GameInit(GameState *g, uint32_t seed);
 void GameUpdate(GameState *g, const FrameInput *in, float dt);
 
 bool GameBlocked(const GameState *g, Vector3 pos, float radius);
+bool GameHasLineOfSight(const GameState *g, Vector3 from, Vector3 to);
 int GameAliveZombies(const GameState *g);
 int GameNearestInteractable(const GameState *g);
 InteractionInfo GameDescribeInteractable(const GameState *g, int index);

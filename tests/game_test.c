@@ -780,6 +780,23 @@ static void TestZombiesNeverStackOnThePlayer(void)
     CHECK(hurt, "zombies around the player must still land hits");
 }
 
+static void TestLineOfSightStopsAtSolids(void)
+{
+    int shotgun_item = FindInteractable(INTERACT_WALL_BUY, WEAPON_SHOTGUN);
+    Vector3 panel = BoxCenter(LEVEL_INTERACTABLES[shotgun_item].box);
+    Vector3 front_eye = {0.0f, PLAYER_EYE_HEIGHT, 8.0f};
+    Vector3 back_eye = {8.0f, PLAYER_EYE_HEIGHT, -2.0f};
+    Vector3 behind_door = {0.0f, PLAYER_EYE_HEIGHT, -3.0f};
+    GameState g = NewActiveGame();
+
+    CHECK(GameHasLineOfSight(&g, front_eye, panel), "the panel is in plain view across the front room");
+    CHECK(!GameHasLineOfSight(&g, back_eye, panel), "the partition must hide a panel in the other room");
+    CHECK(!GameHasLineOfSight(&g, front_eye, behind_door), "a closed door must block the view");
+    g.zone_open[1] = true;
+    CHECK(GameHasLineOfSight(&g, front_eye, behind_door), "an open doorway must not block the view");
+    CHECK(!GameHasLineOfSight(&g, back_eye, panel), "the partition still hides the panel with the door open");
+}
+
 int main(void)
 {
     TestInit();
@@ -799,6 +816,7 @@ int main(void)
     TestGameOverLetsDyingZombiesFinishFalling();
     TestPlayerCannotWalkThroughZombies();
     TestZombiesNeverStackOnThePlayer();
+    TestLineOfSightStopsAtSolids();
 
     if (g_failures > 0) {
         fprintf(stderr, "%d of %d checks failed\n", g_failures, g_checks);
