@@ -780,21 +780,62 @@ static void TestZombiesNeverStackOnThePlayer(void)
     CHECK(hurt, "zombies around the player must still land hits");
 }
 
-static void TestLineOfSightStopsAtSolids(void)
+static const char *InteractableName(int index)
 {
-    int shotgun_item = FindInteractable(INTERACT_WALL_BUY, WEAPON_SHOTGUN);
-    Vector3 panel = BoxCenter(LEVEL_INTERACTABLES[shotgun_item].box);
-    Vector3 front_eye = {0.0f, PLAYER_EYE_HEIGHT, 8.0f};
-    Vector3 back_eye = {8.0f, PLAYER_EYE_HEIGHT, -2.0f};
-    Vector3 behind_door = {0.0f, PLAYER_EYE_HEIGHT, -3.0f};
+    switch (LEVEL_INTERACTABLES[index].kind) {
+    case INTERACT_WALL_BUY: return WEAPONS[LEVEL_INTERACTABLES[index].payload].name;
+    case INTERACT_DOOR: return "door";
+    case INTERACT_PERK: return "perk";
+    }
+    return "?";
+}
+
+static void TestInteractablesAreVisibleInPlainView(void)
+{
+    /* The last three eyes stand at touching distance of the door and the perk, where a ray to a point above the box clips the box. */
+    const Vector3 eyes[] = {
+        {0.0f, PLAYER_EYE_HEIGHT, 10.0f}, {0.0f, PLAYER_EYE_HEIGHT, 8.0f}, {-5.0f, PLAYER_EYE_HEIGHT, 4.0f},
+        {5.0f, PLAYER_EYE_HEIGHT, 12.0f}, {-9.0f, PLAYER_EYE_HEIGHT, 2.0f}, {0.0f, PLAYER_EYE_HEIGHT, 0.8f},
+        {-1.0f, PLAYER_EYE_HEIGHT, 1.0f}, {9.2f, PLAYER_EYE_HEIGHT, 12.2f},
+    };
     GameState g = NewActiveGame();
 
-    CHECK(GameHasLineOfSight(&g, front_eye, panel), "the panel is in plain view across the front room");
-    CHECK(!GameHasLineOfSight(&g, back_eye, panel), "the partition must hide a panel in the other room");
-    CHECK(!GameHasLineOfSight(&g, front_eye, behind_door), "a closed door must block the view");
+    for (size_t e = 0; e < sizeof eyes / sizeof eyes[0]; e++) {
+        for (int i = 0; i < LEVEL_INTERACTABLE_COUNT; i++) {
+            CHECK(GameInteractableVisible(&g, i, eyes[e]), "%s must be visible from (%.1f, %.1f) in the front room", InteractableName(i),
+                  (double)eyes[e].x, (double)eyes[e].z);
+        }
+    }
+}
+
+static void TestPartitionHidesTheFrontRoomFromTheBackRoom(void)
+{
+    const Vector3 eyes[] = {
+        {8.0f, PLAYER_EYE_HEIGHT, -2.0f}, {-8.0f, PLAYER_EYE_HEIGHT, -3.0f}, {0.0f, PLAYER_EYE_HEIGHT, -8.0f},
+    };
+    GameState g = NewActiveGame();
+
+    for (int door_open = 0; door_open <= 1; door_open++) {
+        g.zone_open[1] = door_open != 0;
+        for (size_t e = 0; e < sizeof eyes / sizeof eyes[0]; e++) {
+            for (int i = 0; i < LEVEL_INTERACTABLE_COUNT; i++) {
+                if (LEVEL_INTERACTABLES[i].kind == INTERACT_DOOR) continue;
+                CHECK(!GameInteractableVisible(&g, i, eyes[e]), "%s must stay hidden from (%.1f, %.1f) behind the partition, door open=%d",
+                      InteractableName(i), (double)eyes[e].x, (double)eyes[e].z, door_open);
+            }
+        }
+    }
+}
+
+static void TestDoorwayControlsTheViewIntoTheFrontRoom(void)
+{
+    int perk_item = FindInteractable(INTERACT_PERK, -1);
+    Vector3 lined_up = {-3.0f, PLAYER_EYE_HEIGHT, -3.0f};
+    GameState g = NewActiveGame();
+
+    CHECK(!GameInteractableVisible(&g, perk_item, lined_up), "a closed door must block the view of the perk");
     g.zone_open[1] = true;
-    CHECK(GameHasLineOfSight(&g, front_eye, behind_door), "an open doorway must not block the view");
-    CHECK(!GameHasLineOfSight(&g, back_eye, panel), "the partition still hides the panel with the door open");
+    CHECK(GameInteractableVisible(&g, perk_item, lined_up), "an open doorway must show the perk");
 }
 
 int main(void)
@@ -816,7 +857,9 @@ int main(void)
     TestGameOverLetsDyingZombiesFinishFalling();
     TestPlayerCannotWalkThroughZombies();
     TestZombiesNeverStackOnThePlayer();
-    TestLineOfSightStopsAtSolids();
+    TestInteractablesAreVisibleInPlainView();
+    TestPartitionHidesTheFrontRoomFromTheBackRoom();
+    TestDoorwayControlsTheViewIntoTheFrontRoom();
 
     if (g_failures > 0) {
         fprintf(stderr, "%d of %d checks failed\n", g_failures, g_checks);

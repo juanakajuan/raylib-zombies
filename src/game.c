@@ -30,6 +30,7 @@
 #define DOOR_BOX {{-1.5f, 0.0f, -0.3f}, {1.5f, WALL_HEIGHT, 0.3f}}
 #define DEFAULT_SEED 0x9E3779B9u
 #define PLAYER_MOVER (-1)
+#define VISIBILITY_EPSILON 0.01f
 
 const WeaponDef WEAPONS[WEAPON_COUNT] = {
     [WEAPON_PISTOL] = {
@@ -241,11 +242,13 @@ static float NearestSolidDistance(const GameState *g, Ray ray)
     return nearest;
 }
 
-bool GameHasLineOfSight(const GameState *g, Vector3 from, Vector3 to)
+/* Visible means the ray to the box centre reaches the box before any other solid. The epsilon covers a panel whose face is flush with its wall. */
+bool GameInteractableVisible(const GameState *g, int index, Vector3 eye)
 {
-    Vector3 span = Vector3Subtract(to, from);
-    float distance = Vector3Length(span);
-    return NearestSolidDistance(g, (Ray){from, Vector3Scale(span, 1.0f / distance)}) >= distance;
+    BoundingBox box = LEVEL_INTERACTABLES[index].box;
+    Ray ray = {eye, Vector3Normalize(Vector3Subtract(BoxCenter(box), eye))};
+    RayCollision self = GetRayCollisionBox(ray, box);
+    return self.hit && NearestSolidDistance(g, ray) >= self.distance - VISIBILITY_EPSILON;
 }
 
 static void DamageZombie(GameState *g, Zombie *z, float damage, bool headshot)

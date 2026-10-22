@@ -234,7 +234,7 @@ static void DrawInteractableLabels(const GameState *g, Camera3D camera)
         anchor.y = LEVEL_INTERACTABLES[i].box.max.y + 0.4f;
         Vector3 offset = Vector3Subtract(anchor, camera.position);
         if (Vector3Length(offset) > LABEL_RANGE || Vector3DotProduct(offset, forward) <= 0.1f) continue;
-        if (!GameHasLineOfSight(g, camera.position, anchor)) continue;
+        if (!GameInteractableVisible(g, i, camera.position)) continue;
         Vector2 screen = GetWorldToScreen(anchor, camera);
         DrawTextCentered(TextFormat("%s [%d]", info.subject, info.cost), (int)screen.x, (int)screen.y, 20, (Color){255, 230, 150, 255});
     }
