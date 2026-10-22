@@ -2,6 +2,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "game.h"
 
@@ -333,6 +334,82 @@ static void TestZombiesCrossTheDoorway(void)
     }
 }
 
+static void TestDamageRegenAndGameOver(void)
+{
+    GameState g = NewActiveGame();
+    FrameInput idle = {0};
+    Zombie *z = PlaceZombie(&g, (Vector3){0.0f, 0.0f, 7.0f}, 150.0f);
+    z->attack_timer = 0.0f;
+
+    for (int i = 0; i < 60 * 10 && g.player.health == PLAYER_BASE_HEALTH; i++) GameUpdate(&g, &idle, DT);
+    CHECK(g.player.health == PLAYER_BASE_HEALTH - ZOMBIE_DAMAGE, "health=%.1f after one zombie hit", (double)g.player.health);
+    CHECK(g.player.damage_flash > 0.0f, "damage_flash=%.3f", (double)g.player.damage_flash);
+
+    z->state = ZOMBIE_FREE;
+    float hurt = g.player.health;
+    for (float t = 0.0f; t < REGEN_DELAY - 0.5f; t += DT) GameUpdate(&g, &idle, DT);
+    CHECK(g.player.health == hurt, "no regen before the delay, health=%.1f", (double)g.player.health);
+    for (float t = 0.0f; t < 1.0f; t += DT) GameUpdate(&g, &idle, DT);
+    CHECK(g.player.health > hurt, "regen after the delay, health=%.1f", (double)g.player.health);
+    for (float t = 0.0f; t < 5.0f; t += DT) GameUpdate(&g, &idle, DT);
+    CHECK(g.player.health == g.player.max_health, "health=%.1f should refill", (double)g.player.health);
+
+    g.player.points = 4321;
+    g.player.max_health = PERK_MAX_HEALTH;
+    g.player.health = PERK_MAX_HEALTH;
+    g.zone_open[1] = true;
+    g.round_number = 4;
+    g.kills = 17;
+    g.player.slots[1] = (WeaponSlot){WEAPON_SMG, 3, 5};
+    g.player.slot_count = 2;
+    g.player.active = 1;
+    for (int i = 0; i < 4; i++) {
+        Zombie *mob = PlaceZombie(&g, (Vector3){-1.0f + (float)i * 0.7f, 0.0f, 9.0f}, 9000.0f);
+        mob->attack_timer = 0.0f;
+    }
+    for (int i = 0; i < 60 * 30 && g.phase != PHASE_GAME_OVER; i++) GameUpdate(&g, &idle, DT);
+    CHECK(g.phase == PHASE_GAME_OVER, "phase=%d, health=%.1f", (int)g.phase, (double)g.player.health);
+    CHECK(g.player.health == 0.0f, "health=%.1f", (double)g.player.health);
+    CHECK(g.rounds_survived == 4, "rounds_survived=%d", g.rounds_survived);
+
+    FrameInput restart = {.restart_pressed = true};
+    GameUpdate(&g, &restart, DT);
+    CHECK(g.phase == PHASE_GAME_OVER, "restart must wait RESTART_DELAY so a reload mash cannot trigger it");
+    for (float t = 0.0f; t < RESTART_DELAY; t += DT) GameUpdate(&g, &idle, DT);
+    GameUpdate(&g, &restart, DT);
+
+    GameState fresh;
+    GameInit(&fresh, 1);
+    fresh.rng_state = g.rng_state;
+    CHECK(g.phase == PHASE_INTERMISSION, "phase=%d after restart", (int)g.phase);
+    CHECK(g.round_number == 1, "round_number=%d", g.round_number);
+    CHECK(g.player.points == START_POINTS, "points=%d", g.player.points);
+    CHECK(g.player.max_health == PLAYER_BASE_HEALTH && g.player.health == PLAYER_BASE_HEALTH, "health=%.1f/%.1f",
+          (double)g.player.health, (double)g.player.max_health);
+    CHECK(!g.zone_open[1] && g.zone_open[0], "zones=%d,%d", g.zone_open[0], g.zone_open[1]);
+    CHECK(g.player.slot_count == 1 && g.player.slots[0].id == WEAPON_PISTOL, "slot_count=%d", g.player.slot_count);
+    CHECK(GameAliveZombies(&g) == 0 && g.kills == 0, "alive=%d kills=%d", GameAliveZombies(&g), g.kills);
+    CHECK(memcmp(&g, &fresh, sizeof g) == 0, "restart must leave every field identical to a fresh GameInit");
+}
+
+static void TestZombiesCannotHitThroughThePartition(void)
+{
+    GameState g = NewActiveGame();
+    FrameInput idle = {0};
+    g.zone_open[1] = true;
+    g.player.pos = (Vector3){5.0f, 0.0f, 0.75f};
+    Zombie *z = PlaceZombie(&g, (Vector3){5.0f, 0.0f, -0.75f}, 150.0f);
+    z->attack_timer = 0.0f;
+    bool hit_through_wall = false;
+
+    for (int i = 0; i < 60 * 10 && z->zone == 1; i++) {
+        GameUpdate(&g, &idle, DT);
+        hit_through_wall = hit_through_wall || (z->zone == 1 && g.player.health < PLAYER_BASE_HEALTH);
+    }
+    CHECK(z->zone == 0, "zombie never left the back room, zone=%d", z->zone);
+    CHECK(!hit_through_wall, "a zombie in the back room hurt a player in the front room");
+}
+
 int main(void)
 {
     TestInit();
@@ -342,6 +419,8 @@ int main(void)
     TestRoundProgression();
     TestZombiesStayOutOfWalls();
     TestZombiesCrossTheDoorway();
+    TestDamageRegenAndGameOver();
+    TestZombiesCannotHitThroughThePartition();
 
     if (g_failures > 0) {
         fprintf(stderr, "%d of %d checks failed\n", g_failures, g_checks);

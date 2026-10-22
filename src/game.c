@@ -5,7 +5,6 @@
 
 #include "raymath.h"
 
-#define PARTITION_THICKNESS 0.6f
 #define WALK_SPEED 4.5f
 #define SPRINT_SPEED 6.5f
 #define PITCH_LIMIT (89.0f * DEG2RAD)
@@ -23,6 +22,12 @@
 #define MIN_SPAWN_DISTANCE 7.0f
 #define FIRST_SPAWN_DELAY 0.8f
 #define SPRINTER_SPEED 4.0f
+#define ATTACK_WINDUP 0.4f
+#define ATTACK_COOLDOWN 1.0f
+#define REGEN_RATE 50.0f
+#define DAMAGE_FLASH_TIME 0.35f
+/* Below the 0.6m partition plus both 0.4m body radii, so a zombie cannot hit through the wall. */
+#define ATTACK_RANGE 1.3f
 #define DOOR_BOX {{-1.5f, 0.0f, -0.3f}, {1.5f, WALL_HEIGHT, 0.3f}}
 #define DEFAULT_SEED 0x9E3779B9u
 
@@ -427,8 +432,28 @@ static bool SpawnZombie(GameState *g)
     return true;
 }
 
+static void EnterPhase(GameState *g, GamePhase phase)
+{
+    g->phase = phase;
+    g->phase_timer = 0.0f;
+}
+
+static void DamagePlayer(GameState *g, float amount)
+{
+    Player *p = &g->player;
+    if (g->phase == PHASE_GAME_OVER) return;
+    p->health -= amount;
+    p->time_since_damage = 0.0f;
+    p->damage_flash = DAMAGE_FLASH_TIME;
+    if (p->health > 0.0f) return;
+    p->health = 0.0f;
+    g->rounds_survived = g->round_number;
+    EnterPhase(g, PHASE_GAME_OVER);
+}
+
 static Vector3 ZombieSteering(const GameState *g, const Zombie *z)
 {
+    if (z->state == ZOMBIE_ATTACK) return Vector3Zero();
     Vector3 target = g->player.pos;
     if (z->zone != g->player_zone) {
         target = (Vector3){LEVEL_ZONES[z->zone].portal.x, 0.0f, LEVEL_ZONES[z->zone].portal.y};
@@ -474,12 +499,28 @@ static void UpdateZombie(GameState *g, int index, float dt)
     z->pos = SlideMove(g, z->pos, Vector3Scale(velocity, dt), ZOMBIE_RADIUS);
     z->zone = ZoneAt(z->pos, z->zone);
     if (Vector3LengthSqr(steer) > 0.0f) z->yaw = atan2f(steer.x, -steer.z);
+
+    Vector3 to_player = Vector3Subtract(g->player.pos, z->pos);
+    float distance = Vector3Length(to_player);
+    z->attack_timer -= dt;
+    if (z->state == ZOMBIE_CHASE) {
+        if (z->attack_timer > 0.0f || distance > ATTACK_RANGE) return;
+        z->state = ZOMBIE_ATTACK;
+        z->attack_timer = ATTACK_WINDUP;
+        z->yaw = atan2f(to_player.x, -to_player.z);
+    } else if (z->attack_timer <= 0.0f) {
+        if (distance <= ATTACK_RANGE) DamagePlayer(g, ZOMBIE_DAMAGE);
+        z->state = ZOMBIE_CHASE;
+        z->attack_timer = ATTACK_COOLDOWN;
+    }
 }
 
-static void EnterPhase(GameState *g, GamePhase phase)
+static void UpdateHealth(GameState *g, float dt)
 {
-    g->phase = phase;
-    g->phase_timer = 0.0f;
+    Player *p = &g->player;
+    p->time_since_damage += dt;
+    p->damage_flash = fmaxf(0.0f, p->damage_flash - dt);
+    if (p->time_since_damage >= REGEN_DELAY) p->health = fminf(p->max_health, p->health + REGEN_RATE * dt);
 }
 
 static void StartRound(GameState *g)
@@ -520,8 +561,13 @@ static void UpdateRound(GameState *g, float dt)
 void GameUpdate(GameState *g, const FrameInput *in, float dt)
 {
     g->phase_timer += dt;
+    if (g->phase == PHASE_GAME_OVER) {
+        if (in->restart_pressed && g->phase_timer >= RESTART_DELAY) GameInit(g, RngNext(g));
+        return;
+    }
     UpdateMovement(g, in, dt);
     UpdateWeapon(g, in, dt);
     for (int i = 0; i < MAX_ZOMBIES; i++) UpdateZombie(g, i, dt);
+    UpdateHealth(g, dt);
     UpdateRound(g, dt);
 }
