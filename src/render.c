@@ -323,3 +323,11 @@ void GameDraw(const GameState *g)
     EndMode3D();
     DrawHud(g, camera);
 }
+
+void DrawPauseOverlay(void)
+{
+    int width = GetScreenWidth(), height = GetScreenHeight();
+    DrawRectangle(0, 0, width, height, (Color){0, 0, 0, 150});
+    DrawTextCentered("PAUSED", width / 2, height / 3, 110, WHITE);
+    DrawTextCentered("Esc resume, Q quit", width / 2, height / 3 + 130, 32, (Color){255, 230, 120, 255});
+}

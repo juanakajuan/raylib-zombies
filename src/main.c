@@ -16,6 +16,7 @@
 #define MOUSE_SENSITIVITY 0.0022f
 #define SIM_DT (1.0f / 240.0f)
 #define MAX_FRAME_TIME 0.1f
+#define LOOK_SETTLE_FRAMES 2
 
 #define SMOKE_SEED 20240607u
 #define SMOKE_FRAME_DT (1.0f / 60.0f)
@@ -82,19 +83,41 @@ static void AdvanceSim(GameState *g, SimClock *clock, const FrameInput *fresh, f
     }
 }
 
+/* Pause lives here, not in GamePhase: a paused loop just stops stepping the sim. */
 static int RunGame(void)
 {
     GameState game;
     SimClock clock = {0};
+    bool paused = false;
+    bool quit = false;
+    int discard_look_frames = LOOK_SETTLE_FRAMES;
     GameInit(&game, (uint32_t)time(NULL));
+    SetExitKey(KEY_NULL);
     DisableCursor();
 
-    for (int frame = 0; !WindowShouldClose(); frame++) {
-        FrameInput in = ReadInput();
-        if (frame < 2) in.look = Vector2Zero();
-        AdvanceSim(&game, &clock, &in, GetFrameTime());
+    while (!quit && !WindowShouldClose()) {
+        if (IsKeyPressed(KEY_ESCAPE)) {
+            paused = !paused;
+            clock = (SimClock){0};
+            if (paused) {
+                EnableCursor();
+            } else {
+                DisableCursor();
+                discard_look_frames = LOOK_SETTLE_FRAMES;
+            }
+        }
+        quit = paused && IsKeyPressed(KEY_Q);
+        if (!paused) {
+            FrameInput in = ReadInput();
+            if (discard_look_frames > 0) {
+                in.look = Vector2Zero();
+                discard_look_frames--;
+            }
+            AdvanceSim(&game, &clock, &in, GetFrameTime());
+        }
         BeginDrawing();
         GameDraw(&game);
+        if (paused) DrawPauseOverlay();
         EndDrawing();
     }
     return 0;

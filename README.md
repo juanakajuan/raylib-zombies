@@ -25,7 +25,7 @@ On Linux it also needs the X11 and OpenGL development headers.
 | E | Buy or interact |
 | Q | Swap weapon |
 | Shift | Sprint |
-| Esc | Quit |
+| Esc | Pause and free the mouse. Esc again resumes, Q quits while paused |
 
 ## Features
 
