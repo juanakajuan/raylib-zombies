@@ -42,6 +42,7 @@ On Linux it also needs the X11 and OpenGL development headers.
 - A 750 point door that opens the back room and its zombie spawns.
 - A 2500 point perk that raises max health from 100 to 250.
 - Health regenerates after 3 seconds without damage. Dying shows the game over screen, and R restarts.
+- Sound effects for each weapon, reload, hits and kills, zombie growls and attacks, player damage, round start and end, and purchases (with a buzz when you lack the points).
 
 ## Tests and smoke run
 
@@ -53,10 +54,16 @@ ctest --test-dir build --output-on-failure
 `zombies_test` drives the simulation headlessly with scripted input.
 `--smoke` opens the real window, plays a scripted bot for about 10 seconds and writes `smoke_1.png`, `smoke_2.png` and `smoke_3.png` to the working directory.
 
+## Sound sources and licenses
+
+The game ships no audio files. `src/audio.c` synthesizes every sound at start-up from sine, saw, square and noise generators, so the sounds are original to this project and fall under its MIT license. There are no third-party samples to credit.
+Without an audio device the game runs silently.
+
 ## Layout
 
-- `src/game.h` and `src/game.c` hold the simulation and the static level tables. They make no window or input calls.
+- `src/game.h` and `src/game.c` hold the simulation and the static level tables. They make no window, input or audio calls. `GameUpdate` writes sound events to a fixed-size queue in `GameState`.
 - `src/render.c` draws the scene and HUD from a `const GameState *`.
+- `src/audio.c` turns those events into sounds. `src/main.c` plays them after each sim step.
 - `src/main.c` reads input, runs the fixed-step loop and implements `--smoke`.
 - `tests/game_test.c` is the headless core-loop test.
 

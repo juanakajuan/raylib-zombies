@@ -24,7 +24,7 @@ target_include_directories(game_core PUBLIC src)
 target_link_libraries(game_core PUBLIC raylib m)
 zombies_strict(game_core)
 
-add_executable(zombies src/main.c src/render.c)
+add_executable(zombies src/main.c src/render.c src/audio.c)
 target_link_libraries(zombies PRIVATE game_core)
 zombies_strict(zombies)
 
