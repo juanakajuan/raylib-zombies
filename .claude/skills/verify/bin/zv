@@ -1,0 +1,660 @@
+#!/usr/bin/env python3
+"""zv: drive raylib-zombies in a private headless gamescope display.
+
+Every run lives in verify-artifacts/<run-id>/ at the repo root. That directory
+is the evidence: state.json, game.log, gamescope.log, actions.log, shots/.
+`zv stop` ends the processes and never deletes the directory.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import os
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import time
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Callable, NoReturn
+
+REPO = Path(__file__).resolve().parents[4]
+BUILD = REPO / "build"
+BINARY = BUILD / "zombies"
+ARTIFACTS = REPO / "verify-artifacts"
+LATEST = ARTIFACTS / "latest"
+WINDOW_TITLE = "Zombies"
+WIDTH, HEIGHT = 1280, 720
+
+# Mirrors src/main.c MOUSE_SENSITIVITY and src/render.c FOV_DEGREES.
+MOUSE_SENSITIVITY = 0.0022
+FOV_DEGREES = 75.0
+
+# Named HUD regions as (x, y, w, h) in a 1280x720 frame. Mirrors src/render.c GameDrawHud.
+REGIONS: dict[str, tuple[int, int, int, int]] = {
+    "round": (10, 580, 150, 130),
+    "points": (180, 610, 300, 110),
+    "health": (490, 660, 300, 45),
+    "weapon": (960, 520, 320, 200),
+    "prompt": (140, 400, 1000, 60),
+    "banner": (140, 60, 1000, 220),
+    "center": (440, 160, 400, 400),
+}
+
+
+def die(message: str) -> NoReturn:
+    print(f"zv: {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+@dataclass
+class RunState:
+    run_id: str
+    run_dir: str
+    display: str
+    gamescope_pid: int
+    game_pid: int
+    git_head: str
+    git_dirty: bool
+    binary_mtime: float
+    game_args: list[str]
+    started_at: str
+    output: str = "1280x720"
+    stopped_at: str | None = None
+
+    @staticmethod
+    def load(run_dir: Path) -> RunState:
+        path = run_dir / "state.json"
+        if not path.is_file():
+            die(f"no state.json in {run_dir}; run `zv launch` first")
+        raw: object = json.loads(path.read_text())
+        if not isinstance(raw, dict):
+            die(f"{path} is not a JSON object")
+        try:
+            return RunState(**raw)
+        except TypeError as error:
+            die(f"{path} has an unexpected shape: {error}")
+
+    def save(self) -> None:
+        (Path(self.run_dir) / "state.json").write_text(json.dumps(asdict(self), indent=2) + "\n")
+
+
+def resolve_run(name: str | None) -> Path:
+    if name is None:
+        if not LATEST.exists():
+            die("no runs yet; run `zv launch` first")
+        return LATEST.resolve()
+    candidate = Path(name)
+    return candidate if candidate.is_absolute() else ARTIFACTS / name
+
+
+def alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    stat = Path(f"/proc/{pid}/stat")
+    return stat.is_file() and stat.read_text().split(") ", 1)[1][0] != "Z"
+
+
+def git(*args: str) -> str:
+    return subprocess.run(["git", "-C", str(REPO), *args], capture_output=True, text=True, check=False).stdout.strip()
+
+
+def log_action(run_dir: Path, text: str) -> None:
+    stamp = time.strftime("%H:%M:%S") + f".{int(time.time() * 1000) % 1000:03d}"
+    with (run_dir / "actions.log").open("a") as handle:
+        handle.write(f"{stamp} {text}\n")
+
+
+# ---------------------------------------------------------------- X11 access
+
+
+class Session:
+    """One X connection to a run's gamescope Xwayland display."""
+
+    def __init__(self, state: RunState) -> None:
+        from Xlib import X, XK, display
+        from Xlib.ext import xtest
+
+        # XTEST into the user's own Xwayland goes through KWin's input path and can break it.
+        if state.display in (os.environ.get("DISPLAY"), ":0"):
+            die(f"refusing to send input to the user's own display {state.display}")
+        self.state = state
+        self.run_dir = Path(state.run_dir)
+        self._X = X
+        self._XK = XK
+        self._xtest = xtest
+        self.display = display.Display(state.display)
+        window = self._find_window(self.display.screen().root)
+        if window is None:
+            die(f"no window titled {WINDOW_TITLE!r} on {state.display}")
+        self.window = window
+
+    def _find_window(self, node: object) -> object | None:
+        stack = [node]
+        while stack:
+            current = stack.pop()
+            try:
+                if current.get_wm_name() == WINDOW_TITLE:  # type: ignore[attr-defined]
+                    return current
+                stack.extend(current.query_tree().children)  # type: ignore[attr-defined]
+            except Exception:
+                continue
+        return None
+
+    def keycode(self, name: str) -> int:
+        keysym = self._XK.string_to_keysym(name)
+        if keysym == 0:
+            die(f"unknown key name {name!r}; use X keysym names such as w, Shift_L, Escape, F11, Return")
+        return int(self.display.keysym_to_keycode(keysym))
+
+    def keys_down(self, names: list[str]) -> None:
+        for name in names:
+            self._xtest.fake_input(self.display, self._X.KeyPress, self.keycode(name))
+        self.display.sync()
+
+    def keys_up(self, names: list[str]) -> None:
+        for name in reversed(names):
+            self._xtest.fake_input(self.display, self._X.KeyRelease, self.keycode(name))
+        self.display.sync()
+
+    def button(self, down: bool) -> None:
+        self._xtest.fake_input(self.display, self._X.ButtonPress if down else self._X.ButtonRelease, 1)
+        self.display.sync()
+
+    def move(self, dx: int, dy: int) -> None:
+        """Relative pointer motion, split into steps the game reads as one smooth turn."""
+        steps = max(1, math.ceil(max(abs(dx), abs(dy)) / 40))
+        sent_x = sent_y = 0
+        for i in range(1, steps + 1):
+            step_x = round(dx * i / steps) - sent_x
+            step_y = round(dy * i / steps) - sent_y
+            sent_x += step_x
+            sent_y += step_y
+            self._xtest.fake_input(self.display, self._X.MotionNotify, True, x=step_x, y=step_y)
+            self.display.sync()
+            time.sleep(0.008)
+
+    def grab(self) -> object:
+        from PIL import Image
+
+        geometry = self.window.get_geometry()  # type: ignore[attr-defined]
+        raw = self.window.get_image(0, 0, geometry.width, geometry.height, self._X.ZPixmap, 0xFFFFFFFF)  # type: ignore[attr-defined]
+        return Image.frombytes("RGB", (geometry.width, geometry.height), raw.data, "raw", "BGRX")
+
+    def save_shot(self, name: str) -> Path:
+        shots = self.run_dir / "shots"
+        shots.mkdir(exist_ok=True)
+        path = shots / (name if name.endswith(".png") else f"{name}.png")
+        self.grab().save(path)  # type: ignore[attr-defined]
+        log_action(self.run_dir, f"shot {path.relative_to(self.run_dir)}")
+        return path
+
+
+def session_for(run: str | None) -> Session:
+    state = RunState.load(resolve_run(run))
+    if state.stopped_at is not None or not alive(state.game_pid):
+        die(f"run {state.run_id} is not running; `zv launch` a new one")
+    return Session(state)
+
+
+def parse_keys(spec: str) -> list[str]:
+    return [part for part in spec.split("+") if part]
+
+
+# ---------------------------------------------------------------- zombie finder
+
+
+@dataclass
+class Target:
+    x: float
+    y: float
+    pixels: int
+    height: int
+
+
+def find_zombies(image: object) -> list[Target]:
+    """Zombie skin (src/render.c SKIN) is the only green-dominant colour in the level."""
+    scale = 4
+    full_width, full_height = image.size  # type: ignore[attr-defined]
+    small = image.resize((full_width // scale, full_height // scale))  # type: ignore[attr-defined]
+    width, height = small.size
+    data = small.load()
+    mask = [[False] * width for _ in range(height)]
+    # Skip the HUD band at the bottom so the health bar never counts.
+    for y in range(height - 130 // scale):
+        for x in range(width):
+            r, g, b = data[x, y][:3]
+            mask[y][x] = g > 35 and g >= r + 8 and g >= b + 10
+    seen = [[False] * width for _ in range(height)]
+    targets: list[Target] = []
+    for y0 in range(height):
+        for x0 in range(width):
+            if not mask[y0][x0] or seen[y0][x0]:
+                continue
+            stack = [(x0, y0)]
+            seen[y0][x0] = True
+            cells: list[tuple[int, int]] = []
+            while stack:
+                cx, cy = stack.pop()
+                cells.append((cx, cy))
+                for nx, ny in ((cx + 1, cy), (cx - 1, cy), (cx, cy + 1), (cx, cy - 1)):
+                    if 0 <= nx < width and 0 <= ny < height and mask[ny][nx] and not seen[ny][nx]:
+                        seen[ny][nx] = True
+                        stack.append((nx, ny))
+            if len(cells) < 2:
+                continue
+            top = min(cy for _, cy in cells)
+            bottom = max(cy for _, cy in cells)
+            # Aim at the top third of the blob: the head sits above the arms.
+            head = [c for c in cells if c[1] <= top + max(1, (bottom - top) // 3)]
+            hx = sum(c[0] for c in head) / len(head)
+            hy = sum(c[1] for c in head) / len(head)
+            targets.append(Target(hx * scale + scale / 2, hy * scale + scale / 2, len(cells), (bottom - top + 1) * scale))
+    targets.sort(key=lambda t: t.pixels, reverse=True)
+    return targets
+
+
+def red_banner(image: object) -> bool:
+    """True while a big blood-red title ("ROUND N" or "GAME OVER") is on screen."""
+    region = image.crop((300, 90, 980, 300)).resize((170, 52))  # type: ignore[attr-defined]
+    raw = region.convert("RGB").tobytes()  # type: ignore[attr-defined]
+    red = sum(1 for i in range(0, len(raw), 3) if raw[i] > 150 and raw[i + 1] < 70 and raw[i + 2] < 70)
+    return red > 300
+
+
+def pixels_to_mouse(px: float, py: float, size: tuple[int, int]) -> tuple[int, int]:
+    width, height = size
+    focal = (height / 2) / math.tan(math.radians(FOV_DEGREES / 2))
+    yaw = math.atan((px - width / 2) / focal)
+    pitch = math.atan((py - height / 2) / focal)
+    return round(yaw / MOUSE_SENSITIVITY), round(pitch / MOUSE_SENSITIVITY)
+
+
+# ---------------------------------------------------------------- commands
+
+
+def cmd_build(_: argparse.Namespace) -> None:
+    build(None)
+
+
+def build(log_path: Path | None) -> None:
+    """Configure if needed, then build. With a log path, output goes there and only a failure is reported."""
+    steps: list[list[str]] = []
+    if not (BUILD / "CMakeCache.txt").is_file():
+        configure = ["cmake", "-S", str(REPO), "-B", str(BUILD), "-DCMAKE_BUILD_TYPE=Release"]
+        source = os.environ.get("FETCHCONTENT_SOURCE_DIR_RAYLIB")
+        if source:
+            configure.append(f"-DFETCHCONTENT_SOURCE_DIR_RAYLIB={source}")
+        steps.append(configure)
+    steps.append(["cmake", "--build", str(BUILD), "-j"])
+    for step in steps:
+        if log_path is None:
+            result = subprocess.run(step, check=False)
+        else:
+            with log_path.open("a") as log:
+                result = subprocess.run(step, check=False, stdout=log, stderr=subprocess.STDOUT)
+        if result.returncode != 0:
+            die(f"`{' '.join(step)}` failed" + (f"; see {log_path}" if log_path else ""))
+    if not BINARY.is_file():
+        die(f"build finished but {BINARY} is missing")
+
+
+def cmd_launch(args: argparse.Namespace) -> None:
+    for tool in ("gamescope", "dbus-run-session", "cmake"):
+        if shutil.which(tool) is None:
+            die(f"{tool} is not on PATH")
+    match = re.fullmatch(r"(\d+)x(\d+)", args.output)
+    if match is None or int(match[1]) < WIDTH or int(match[2]) < HEIGHT:
+        die(f"--output must be WxH and at least {WIDTH}x{HEIGHT}, got {args.output!r}")
+    out_w, out_h = match[1], match[2]
+    run_id = args.run or time.strftime("%Y%m%d-%H%M%S") + f"-{os.getpid()}"
+    run_dir = ARTIFACTS / run_id
+    if (run_dir / "state.json").exists():
+        die(f"run {run_id} already exists; pick another --run name")
+    (run_dir / "shots").mkdir(parents=True, exist_ok=True)
+    if not args.no_build:
+        build(run_dir / "build.log")
+    child = run_dir / "child.sh"
+    # gamescope picks a free display; the child records it and its own PID, then becomes the game.
+    child.write_text(
+        "#!/bin/sh\n"
+        f'cd "{run_dir}"\n'
+        'echo "$DISPLAY" > display.txt\n'
+        "echo $$ > game.pid\n"
+        f'exec "{BINARY}" "$@" > game.log 2>&1\n'
+    )
+    child.chmod(0o755)
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("DISPLAY", "WAYLAND_DISPLAY", "DBUS_SESSION_BUS_ADDRESS")}
+    # Hardware GL presents by buffer flips, so X GetImage returns stale frames. llvmpipe keeps them current.
+    env["LIBGL_ALWAYS_SOFTWARE"] = "1"
+    with (run_dir / "gamescope.log").open("w") as gs_log:
+        # A private session bus: on the user's bus a nested compositor can take over their
+        # KDE global shortcuts (kglobalaccel) and leave them inactive when it exits.
+        gamescope = subprocess.Popen(
+            ["dbus-run-session", "--",
+             "gamescope", "--backend", "headless", "-W", out_w, "-H", out_h, "-w", out_w, "-h", out_h, "-r", "60",
+             "--", str(child), *args.game_args],
+            env=env, stdout=gs_log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True,
+        )
+    deadline = time.time() + args.timeout
+    while not ((run_dir / "display.txt").is_file() and (run_dir / "game.pid").is_file()):
+        if gamescope.poll() is not None or time.time() > deadline:
+            die(f"gamescope did not start the game; see {run_dir / 'gamescope.log'}")
+        time.sleep(0.1)
+    time.sleep(0.2)
+    state = RunState(
+        run_id=run_id,
+        run_dir=str(run_dir),
+        display=(run_dir / "display.txt").read_text().strip(),
+        gamescope_pid=gamescope.pid,
+        game_pid=int((run_dir / "game.pid").read_text().strip()),
+        git_head=git("rev-parse", "HEAD"),
+        git_dirty=bool(git("status", "--porcelain", "--", "src", "CMakeLists.txt")),
+        binary_mtime=BINARY.stat().st_mtime,
+        game_args=list(args.game_args),
+        started_at=time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        output=args.output,
+    )
+    state.save()
+    if LATEST.is_symlink() or LATEST.exists():
+        LATEST.unlink()
+    LATEST.symlink_to(run_id)
+    log_action(run_dir, f"launch display={state.display} args={state.game_args}")
+    # Ready means the game window is mapped and the HUD has been drawn.
+    while time.time() < deadline:
+        if not alive(state.game_pid):
+            die(f"game exited during startup; see {run_dir / 'game.log'}")
+        log = (run_dir / "game.log").read_text(errors="replace") if (run_dir / "game.log").is_file() else ""
+        if "TIMER: Target time per frame" in log:
+            try:
+                image = Session(state).grab()
+                if len(image.getcolors(1 << 16) or ()) > 8:  # type: ignore[attr-defined]
+                    print(f"ready run={run_id} display={state.display} dir={run_dir}")
+                    return
+            except SystemExit:
+                pass
+        time.sleep(0.25)
+    die(f"game never became ready within {args.timeout}s; run `zv stop --run {run_id}` and read {run_dir}")
+
+
+def cmd_doctor(args: argparse.Namespace) -> None:
+    problems: list[str] = []
+    for module in ("Xlib", "PIL"):
+        try:
+            __import__(module)
+        except ImportError:
+            problems.append(f"python module {module} is missing")
+    run_dir = resolve_run(args.run)
+    state = RunState.load(run_dir)
+    print(f"run        {state.run_id}  dir={run_dir}")
+    print(f"display    {state.display}  gamescope_pid={state.gamescope_pid}  game_pid={state.game_pid}")
+    print(f"built from {state.git_head[:12]}{' +dirty' if state.git_dirty else ''}  args={state.game_args}")
+    if state.stopped_at is not None:
+        problems.append(f"run was stopped at {state.stopped_at}")
+    for label, pid in (("gamescope", state.gamescope_pid), ("game", state.game_pid)):
+        if not alive(pid):
+            problems.append(f"{label} pid {pid} is not running")
+    if alive(state.game_pid):
+        exe = Path(f"/proc/{state.game_pid}/exe").resolve()
+        if exe != BINARY.resolve():
+            problems.append(f"game pid {state.game_pid} runs {exe}, not {BINARY}")
+    if BINARY.is_file() and BINARY.stat().st_mtime != state.binary_mtime:
+        problems.append("build/zombies was rebuilt after launch; the running game is stale")
+    newest_source = max(p.stat().st_mtime for p in (REPO / "src").glob("*.[ch]"))
+    if newest_source > state.binary_mtime:
+        problems.append("src/ changed after the running binary was built; stop, then launch again")
+    if not problems:
+        session = Session(state)
+        first = session.grab()
+        time.sleep(1.2)
+        second = session.grab()
+        size = first.size  # type: ignore[attr-defined]
+        print(f"window     {size[0]}x{size[1]} ({window_mode(state, size)})")
+        if window_mode(state, size) == "unexpected size":
+            problems.append(f"window is {size[0]}x{size[1]}; expected {WIDTH}x{HEIGHT} or the output {state.output}")
+        if first.tobytes() == second.tobytes():  # type: ignore[attr-defined]
+            print("frames     identical over 1.2s (normal when paused or on the game over screen)")
+        else:
+            print("frames     advancing")
+    if problems:
+        for problem in problems:
+            print(f"PROBLEM    {problem}")
+        sys.exit(1)
+    print("OK")
+
+
+def window_mode(state: RunState, size: tuple[int, int]) -> str:
+    output = tuple(int(n) for n in state.output.split("x"))
+    if size == output:
+        return "fullscreen" if output != (WIDTH, HEIGHT) else "windowed or fullscreen: output is 1280x720, launch --output 1920x1080 to tell them apart"
+    return "windowed" if size == (WIDTH, HEIGHT) else "unexpected size"
+
+
+def cmd_window(args: argparse.Namespace) -> None:
+    session = session_for(args.run)
+    geometry = session.window.get_geometry()  # type: ignore[attr-defined]
+    size = (int(geometry.width), int(geometry.height))
+    line = f"window {size[0]}x{size[1]} output {session.state.output} mode {window_mode(session.state, size)}"
+    log_action(session.run_dir, line)
+    print(line)
+
+
+def cmd_key(args: argparse.Namespace) -> None:
+    session = session_for(args.run)
+    names = parse_keys(args.keys)
+    for _ in range(args.repeat):
+        session.keys_down(names)
+        time.sleep(args.hold)
+        session.keys_up(names)
+        time.sleep(args.gap)
+    log_action(session.run_dir, f"key {args.keys} hold={args.hold} repeat={args.repeat}")
+
+
+def cmd_click(args: argparse.Namespace) -> None:
+    session = session_for(args.run)
+    for _ in range(args.count):
+        session.button(True)
+        time.sleep(args.hold)
+        session.button(False)
+        time.sleep(args.interval)
+    log_action(session.run_dir, f"click count={args.count} hold={args.hold} interval={args.interval}")
+
+
+def cmd_look(args: argparse.Namespace) -> None:
+    session = session_for(args.run)
+    dx = round(math.radians(args.yaw) / MOUSE_SENSITIVITY)
+    dy = round(-math.radians(args.pitch) / MOUSE_SENSITIVITY)
+    session.move(dx, dy)
+    time.sleep(0.05)
+    log_action(session.run_dir, f"look yaw={args.yaw}deg pitch={args.pitch}deg (mouse {dx},{dy})")
+
+
+def cmd_shot(args: argparse.Namespace) -> None:
+    session = session_for(args.run)
+    path = session.save_shot(args.name)
+    if args.crop:
+        from PIL import Image
+
+        if Image.open(path).size != (WIDTH, HEIGHT):
+            die(f"--crop regions are measured for a {WIDTH}x{HEIGHT} window; read the full shot instead")
+
+        x, y, w, h = REGIONS[args.crop]
+        crop_path = path.with_name(f"{path.stem}.{args.crop}.png")
+        Image.open(path).crop((x, y, x + w, y + h)).resize((w * 2, h * 2), Image.Resampling.NEAREST).save(crop_path)
+        print(crop_path)
+    print(path)
+
+
+def cmd_zombies(args: argparse.Namespace) -> None:
+    session = session_for(args.run)
+    targets = find_zombies(session.grab())
+    if not targets:
+        print("no zombies visible")
+    for t in targets:
+        print(f"zombie head_px=({t.x:.0f},{t.y:.0f}) size_px={t.pixels} height_px={t.height}")
+
+
+def cmd_hunt(args: argparse.Namespace) -> None:
+    """Closed loop through real input: find a zombie on screen, turn to it, click to fire."""
+    session = session_for(args.run)
+    shots = since_reload = scans = 0
+    # Net mouse motion sent, so --restore-view can undo it. Yaw is unclamped; the loop keeps pitch small.
+    total_x = total_y = 0
+
+    def turn(dx: int, dy: int) -> None:
+        nonlocal total_x, total_y
+        session.move(dx, dy)
+        total_x += dx
+        total_y += dy
+
+    def reload() -> None:
+        session.keys_down(["r"])
+        time.sleep(0.05)
+        session.keys_up(["r"])
+
+    stop_reason = "time"
+    deadline = time.time() + args.seconds
+    while time.time() < deadline and alive(session.state.game_pid):
+        frame = session.grab()
+        if args.until_clear and shots > 0 and red_banner(frame):
+            stop_reason = "red banner (round cleared, or game over)"
+            break
+        targets = find_zombies(frame)
+        if not targets:
+            if since_reload > 0:
+                reload()
+                since_reload = 0
+            # Level the view, then sweep right.
+            turn(round(0.6 / MOUSE_SENSITIVITY), -total_y)
+            scans += 1
+            time.sleep(0.12)
+            continue
+        target = targets[0]
+        dx, dy = pixels_to_mouse(target.x, target.y, frame.size)  # type: ignore[attr-defined]
+        if abs(dx) > 4 or abs(dy) > 4:
+            turn(dx, dy)
+        if not args.stay and target.height > 260:
+            session.keys_down(["s"])
+            time.sleep(0.25)
+            session.keys_up(["s"])
+        time.sleep(0.04)
+        if abs(dx) <= 25 and abs(dy) <= 25:
+            session.button(True)
+            time.sleep(0.04)
+            session.button(False)
+            shots += 1
+            since_reload += 1
+            if since_reload >= args.mag:
+                reload()
+                since_reload = 0
+                time.sleep(args.reload_wait)
+            time.sleep(args.fire_interval)
+    if args.restore_view:
+        session.move(-total_x, -total_y)
+        time.sleep(0.05)
+    log_action(session.run_dir, f"hunt seconds={args.seconds} stay={args.stay} restore_view={args.restore_view} shots={shots} scans={scans} stop={stop_reason}")
+    print(f"hunt done shots={shots} scans={scans} stop={stop_reason}")
+
+
+def cmd_stop(args: argparse.Namespace) -> None:
+    run_dir = resolve_run(args.run)
+    state = RunState.load(run_dir)
+    for pid in (state.gamescope_pid,):
+        if alive(pid):
+            # gamescope was started in its own session, so its PID is the process group we own.
+            os.killpg(pid, signal.SIGTERM)
+    wait: Callable[[], bool] = lambda: alive(state.gamescope_pid) or alive(state.game_pid)
+    deadline = time.time() + 5
+    while wait() and time.time() < deadline:
+        time.sleep(0.1)
+    if alive(state.gamescope_pid):
+        os.killpg(state.gamescope_pid, signal.SIGKILL)
+    if alive(state.game_pid):
+        os.kill(state.game_pid, signal.SIGKILL)
+    if state.stopped_at is None:
+        state.stopped_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+        state.save()
+    log_action(run_dir, "stop")
+    print(f"stopped run={state.run_id}; evidence kept in {run_dir}")
+
+
+def cmd_runs(_: argparse.Namespace) -> None:
+    if not ARTIFACTS.is_dir():
+        print("no runs")
+        return
+    for run_dir in sorted(p for p in ARTIFACTS.iterdir() if p.is_dir() and not p.is_symlink()):
+        if not (run_dir / "state.json").is_file():
+            continue
+        state = RunState.load(run_dir)
+        status = "running" if state.stopped_at is None and alive(state.game_pid) else "stopped"
+        print(f"{state.run_id}  {status}  display={state.display}  shots={len(list((run_dir / 'shots').glob('*.png')))}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(prog="zv", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    def add(name: str, handler: Callable[[argparse.Namespace], None], help_text: str) -> argparse.ArgumentParser:
+        p = sub.add_parser(name, help=help_text)
+        p.set_defaults(handler=handler)
+        if name not in ("build", "runs"):
+            p.add_argument("--run", help="run id under verify-artifacts/ (default: latest)")
+        return p
+
+    add("build", cmd_build, "configure if needed and build build/zombies")
+    p = add("launch", cmd_launch, "build, start gamescope headless with the game, wait until ready")
+    p.add_argument("--no-build", action="store_true")
+    p.add_argument("--timeout", type=float, default=30.0)
+    p.add_argument("--output", default=f"{WIDTH}x{HEIGHT}", help="headless monitor size; 1920x1080 makes fullscreen visible")
+    p.add_argument("game_args", nargs=argparse.REMAINDER, help="after --, passed to the game")
+    add("doctor", cmd_doctor, "read-only health check of a run")
+    add("window", cmd_window, "print the game window size and whether it is windowed or fullscreen")
+    p = add("key", cmd_key, "press keys, e.g. w, e, r, q, Escape, F11, Alt_L+Return, w+Shift_L")
+    p.add_argument("keys")
+    p.add_argument("--hold", type=float, default=0.08, help="seconds the keys stay down")
+    p.add_argument("--repeat", type=int, default=1)
+    p.add_argument("--gap", type=float, default=0.12, help="seconds between repeats")
+    p = add("click", cmd_click, "left mouse button (fire)")
+    p.add_argument("--count", type=int, default=1)
+    p.add_argument("--hold", type=float, default=0.05, help="seconds held; hold long for the automatic MP5K")
+    p.add_argument("--interval", type=float, default=0.35, help="seconds between clicks (M1911 fires every 0.28s)")
+    p = add("look", cmd_look, "turn the view by degrees through relative mouse motion")
+    p.add_argument("yaw", type=float, help="degrees, positive turns right")
+    p.add_argument("pitch", type=float, nargs="?", default=0.0, help="degrees, positive looks up")
+    p = add("shot", cmd_shot, "save a screenshot to <run>/shots/<name>.png")
+    p.add_argument("name")
+    p.add_argument("--crop", choices=sorted(REGIONS), help="also save a 2x crop of one HUD region")
+    add("zombies", cmd_zombies, "list zombies visible on screen")
+    p = add("hunt", cmd_hunt, "bot that aims at visible zombies and fires, through real input")
+    p.add_argument("--seconds", type=float, default=20.0)
+    p.add_argument("--mag", type=int, default=8, help="clicks before pressing R (M1911 mag is 8)")
+    p.add_argument("--fire-interval", type=float, default=0.3)
+    p.add_argument("--reload-wait", type=float, default=1.5)
+    p.add_argument("--until-clear", action="store_true", help="stop early when the ROUND/GAME OVER banner appears")
+    p.add_argument("--stay", action="store_true", help="never step back, so the player keeps its position")
+    p.add_argument("--restore-view", action="store_true", help="turn back to the starting view direction at the end")
+    add("stop", cmd_stop, "end a run's processes; keeps its evidence directory")
+    add("runs", cmd_runs, "list runs and their status")
+
+    args = parser.parse_args()
+    if getattr(args, "game_args", None) and args.game_args[0] == "--":
+        args.game_args = args.game_args[1:]
+    from Xlib.error import ConnectionClosedError
+
+    try:
+        args.handler(args)
+    except ConnectionClosedError:
+        die("the X display closed: the game exited and gamescope exited with it. `zv doctor` shows the run state")
+
+
+if __name__ == "__main__":
+    main()
