@@ -13,6 +13,8 @@ import numpy as np
 RATE = 44100
 PEAK = 0.9
 RELOAD_PEAK = 0.4
+RELOAD_CEILING = 0.2
+LIMIT_WINDOW = 0.02
 PRE_ROLL = 0.01
 FADE = 0.01
 ONSET_FRACTION = 0.1
@@ -57,6 +59,15 @@ def finish(samples: np.ndarray, peak: float) -> np.ndarray:
     return samples
 
 
+def limit(samples: np.ndarray, ceiling: float) -> np.ndarray:
+    """Pull loud stretches down to the ceiling so the loudest click of a clip matches its quiet parts."""
+    window = int(LIMIT_WINDOW * RATE)
+    padded = np.pad(np.abs(samples), (window // 2, window - window // 2 - 1))
+    envelope = np.lib.stride_tricks.sliding_window_view(padded, window).max(axis=1)
+    gain = np.minimum(1.0, ceiling / np.maximum(envelope, 1e-9))
+    return samples * np.convolve(gain, np.ones(window) / window, mode="same")
+
+
 def write(path: Path, samples: np.ndarray) -> None:
     with wave.open(str(path), "wb") as out:
         out.setnchannels(1)
@@ -71,6 +82,8 @@ def main() -> None:
     dest.mkdir(parents=True, exist_ok=True)
     for name, (filename, seconds, peak) in CLIPS.items():
         clip = finish(cut(decode(source / filename), seconds), peak)
+        if name.startswith("reload_"):
+            clip = limit(clip, RELOAD_CEILING)
         write(dest / f"{name}.wav", clip)
         print(f"{name}.wav {len(clip) / RATE:.2f}s")
 
