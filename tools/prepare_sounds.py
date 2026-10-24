@@ -12,24 +12,25 @@ import numpy as np
 
 RATE = 44100
 PEAK = 0.9
+RELOAD_PEAK = 0.4
 PRE_ROLL = 0.01
 FADE = 0.01
 ONSET_FRACTION = 0.1
 
-# output name: (source file, seconds to keep from the first loud sample, or None for the whole file)
+# output name: (source file, seconds to keep from the first loud sample or None for the whole file, peak level)
 CLIPS = {
-    "fire_pistol": ("A_42P.wav", 0.7),
-    "fire_smg": ("G_31P.wav", 0.4),
-    "fire_shotgun": ("O_21P.wav", 0.9),
-    "reload_pistol": ("gunreload1.wav", None),
-    "reload_smg": ("assaultriflereload1_0.wav", None),
-    "reload_shotgun": ("shotguncock_0.wav", None),
-    "growl_1": ("zombie-17.wav", None),
-    "growl_2": ("zombie-16.wav", None),
-    "growl_3": ("zombie-21.wav", None),
-    "attack_1": ("zombie-24.wav", None),
-    "attack_2": ("zombie-5.wav", None),
-    "attack_3": ("zombie-11.wav", None),
+    "fire_pistol": ("A_42P.wav", 0.7, PEAK),
+    "fire_smg": ("G_31P.wav", 0.4, PEAK),
+    "fire_shotgun": ("O_21P.wav", 0.9, PEAK),
+    "reload_pistol": ("gunreload1.wav", None, RELOAD_PEAK),
+    "reload_smg": ("assaultriflereload1_0.wav", None, RELOAD_PEAK),
+    "reload_shotgun": ("shotguncock_0.wav", None, RELOAD_PEAK),
+    "growl_1": ("zombie-17.wav", None, PEAK),
+    "growl_2": ("zombie-16.wav", None, PEAK),
+    "growl_3": ("zombie-21.wav", None, PEAK),
+    "attack_1": ("zombie-24.wav", None, PEAK),
+    "attack_2": ("zombie-5.wav", None, PEAK),
+    "attack_3": ("zombie-11.wav", None, PEAK),
 }
 
 
@@ -49,8 +50,8 @@ def cut(samples: np.ndarray, seconds: float | None) -> np.ndarray:
     return samples[start:start + int(seconds * RATE)]
 
 
-def finish(samples: np.ndarray) -> np.ndarray:
-    samples = samples / np.abs(samples).max() * PEAK
+def finish(samples: np.ndarray, peak: float) -> np.ndarray:
+    samples = samples / np.abs(samples).max() * peak
     fade = min(int(FADE * RATE), len(samples))
     samples[-fade:] *= np.linspace(1.0, 0.0, fade)
     return samples
@@ -68,8 +69,8 @@ def main() -> None:
     source = Path(sys.argv[1])
     dest = Path(sys.argv[2]) if len(sys.argv) > 2 else Path(__file__).resolve().parent.parent / "assets"
     dest.mkdir(parents=True, exist_ok=True)
-    for name, (filename, seconds) in CLIPS.items():
-        clip = finish(cut(decode(source / filename), seconds))
+    for name, (filename, seconds, peak) in CLIPS.items():
+        clip = finish(cut(decode(source / filename), seconds), peak)
         write(dest / f"{name}.wav", clip)
         print(f"{name}.wav {len(clip) / RATE:.2f}s")
 
