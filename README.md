@@ -61,11 +61,9 @@ A missing clip falls back to a synthesized sound. Without an audio device the ga
 
 | Clips | Source | Author | License |
 | --- | --- | --- | --- |
-| `fire_pistol`, `fire_smg`, `fire_shotgun` | [gunshot sounds](https://opengameart.org/content/gunshot-sounds) (`cz.wav`, `sks.wav`, `shotty.wav`) | Vincent Sevedge, 2009 | [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/) |
+| `fire_pistol`, `fire_smg`, `fire_shotgun` | [The Free Firearm Sound Library](https://opengameart.org/content/the-free-firearm-sound-library) (Colt 1911 `A_42P`, Carl Gustav M45 `G_31P`, Benelli Nova `O_21P`) | Ben Jaszczak, Brian Nelson, Kevin Heras, Matthew Nanney | [CC0](https://creativecommons.org/publicdomain/zero/1.0/) |
 | `reload_pistol`, `reload_smg`, `reload_shotgun` | [gun reload sounds](https://opengameart.org/content/gun-reload-sounds) | SpringySpringo | [CC0](https://creativecommons.org/publicdomain/zero/1.0/) |
 | `growl_1` to `growl_3`, `attack_1` to `attack_3` | [Zombies Sound Pack](https://opengameart.org/content/zombies-sound-pack) (`zombie-17`, `16`, `21`, `24`, `5`, `11`) | artisticdude | [CC0](https://creativecommons.org/publicdomain/zero/1.0/) |
-
-The gunshot page lists CC0, but the `creativecommons.txt` inside its zip says CC BY 3.0, so the table follows the zip and credits the author.
 
 ## Layout
 

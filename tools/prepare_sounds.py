@@ -18,9 +18,9 @@ ONSET_FRACTION = 0.1
 
 # output name: (source file, seconds to keep from the first loud sample, or None for the whole file)
 CLIPS = {
-    "fire_pistol": ("cz.wav", 0.6),
-    "fire_smg": ("sks.wav", 0.4),
-    "fire_shotgun": ("shotty.wav", None),
+    "fire_pistol": ("A_42P.wav", 0.7),
+    "fire_smg": ("G_31P.wav", 0.4),
+    "fire_shotgun": ("O_21P.wav", 0.9),
     "reload_pistol": ("gunreload1.wav", None),
     "reload_smg": ("assaultriflereload1_0.wav", None),
     "reload_shotgun": ("shotguncock_0.wav", None),
