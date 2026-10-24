@@ -27,6 +27,8 @@ zombies_strict(game_core)
 add_executable(zombies src/main.c src/render.c src/audio.c)
 target_link_libraries(zombies PRIVATE game_core)
 zombies_strict(zombies)
+add_custom_command(TARGET zombies POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:zombies>/assets)
 
 enable_testing()
 add_executable(zombies_test tests/game_test.c)

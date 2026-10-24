@@ -56,14 +56,22 @@ ctest --test-dir build --output-on-failure
 
 ## Sound sources and licenses
 
-The game ships no audio files. `src/audio.c` synthesizes every sound at start-up from sine, saw, square and noise generators, so the sounds are original to this project and fall under its MIT license. There are no third-party samples to credit.
-Without an audio device the game runs silently.
+Gun, reload and zombie sounds are clips from the files below, cut and converted by `tools/prepare_sounds.py` into `assets/`. Every other sound (hit, kill, headshot kill, player damage, round start and end, purchase, denied) is synthesized in `src/audio.c`, is original to this project and falls under its MIT license.
+A missing clip falls back to a synthesized sound. Without an audio device the game runs silently.
+
+| Clips | Source | Author | License |
+| --- | --- | --- | --- |
+| `fire_pistol`, `fire_smg`, `fire_shotgun` | [gunshot sounds](https://opengameart.org/content/gunshot-sounds) (`cz.wav`, `sks.wav`, `shotty.wav`) | Vincent Sevedge, 2009 | [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/) |
+| `reload_pistol`, `reload_smg`, `reload_shotgun` | [gun reload sounds](https://opengameart.org/content/gun-reload-sounds) | SpringySpringo | [CC0](https://creativecommons.org/publicdomain/zero/1.0/) |
+| `growl_1` to `growl_3`, `attack_1` to `attack_3` | [Zombies Sound Pack](https://opengameart.org/content/zombies-sound-pack) (`zombie-17`, `16`, `21`, `24`, `5`, `11`) | artisticdude | [CC0](https://creativecommons.org/publicdomain/zero/1.0/) |
+
+The gunshot page lists CC0, but the `creativecommons.txt` inside its zip says CC BY 3.0, so the table follows the zip and credits the author.
 
 ## Layout
 
 - `src/game.h` and `src/game.c` hold the simulation and the static level tables. They make no window, input or audio calls. `GameUpdate` writes sound events to a fixed-size queue in `GameState`.
 - `src/render.c` draws the scene and HUD from a `const GameState *`.
-- `src/audio.c` turns those events into sounds. `src/main.c` plays them after each sim step.
+- `src/audio.c` turns those events into sounds. `assets/` holds the clips and is copied next to the executable at build time. `src/main.c` plays them after each sim step.
 - `src/main.c` reads input, runs the fixed-step loop and implements `--smoke`.
 - `tests/game_test.c` is the headless core-loop test.
 

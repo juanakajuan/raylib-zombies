@@ -5,6 +5,7 @@
 
 #define SAMPLE_RATE 22050
 #define VOICES 4
+#define MAX_VARIANTS 3
 #define PEAK 0.85f
 #define TWO_PI (2.0f * PI)
 
@@ -12,7 +13,9 @@ typedef enum SoundId {
     SOUND_FIRE_PISTOL,
     SOUND_FIRE_SMG,
     SOUND_FIRE_SHOTGUN,
-    SOUND_RELOAD,
+    SOUND_RELOAD_PISTOL,
+    SOUND_RELOAD_SMG,
+    SOUND_RELOAD_SHOTGUN,
     SOUND_HIT,
     SOUND_KILL,
     SOUND_HEADSHOT_KILL,
@@ -33,16 +36,22 @@ typedef struct Synth {
 
 typedef float (*SynthFn)(Synth *s, float t);
 
+/* The files play in turn. When any file is missing the synthesized sound plays instead. */
 typedef struct SoundDef {
     float seconds;
     float volume;
     SynthFn synth;
+    const char *files[MAX_VARIANTS];
 } SoundDef;
 
 typedef struct VoiceBank {
-    Sound voices[VOICES];
-    int next;
+    Sound voices[MAX_VARIANTS][VOICES];
+    int variants;
+    int next_variant;
+    int next_voice[MAX_VARIANTS];
 } VoiceBank;
+
+_Static_assert(WEAPON_PISTOL == 0 && WEAPON_SMG == 1 && WEAPON_SHOTGUN == 2, "fire and reload sounds are indexed by WeaponId");
 
 static VoiceBank g_bank[SOUND_COUNT];
 static bool g_ready = false;
@@ -186,15 +195,17 @@ static float Denied(Synth *s, float t)
 }
 
 static const SoundDef SOUNDS[SOUND_COUNT] = {
-    [SOUND_FIRE_PISTOL] = {0.25f, 0.8f, FirePistol},
-    [SOUND_FIRE_SMG] = {0.12f, 0.6f, FireSmg},
-    [SOUND_FIRE_SHOTGUN] = {0.6f, 1.0f, FireShotgun},
-    [SOUND_RELOAD] = {0.95f, 0.6f, Reload},
+    [SOUND_FIRE_PISTOL] = {0.25f, 0.8f, FirePistol, {"fire_pistol.wav"}},
+    [SOUND_FIRE_SMG] = {0.12f, 0.6f, FireSmg, {"fire_smg.wav"}},
+    [SOUND_FIRE_SHOTGUN] = {0.6f, 1.0f, FireShotgun, {"fire_shotgun.wav"}},
+    [SOUND_RELOAD_PISTOL] = {0.95f, 0.6f, Reload, {"reload_pistol.wav"}},
+    [SOUND_RELOAD_SMG] = {0.95f, 0.6f, Reload, {"reload_smg.wav"}},
+    [SOUND_RELOAD_SHOTGUN] = {0.95f, 0.6f, Reload, {"reload_shotgun.wav"}},
     [SOUND_HIT] = {0.12f, 0.5f, Hit},
     [SOUND_KILL] = {0.35f, 0.7f, Kill},
     [SOUND_HEADSHOT_KILL] = {0.35f, 0.8f, HeadshotKill},
-    [SOUND_GROWL] = {0.9f, 0.35f, Growl},
-    [SOUND_ZOMBIE_ATTACK] = {0.4f, 0.6f, ZombieAttack},
+    [SOUND_GROWL] = {0.9f, 0.5f, Growl, {"growl_1.wav", "growl_2.wav", "growl_3.wav"}},
+    [SOUND_ZOMBIE_ATTACK] = {0.4f, 0.7f, ZombieAttack, {"attack_1.wav", "attack_2.wav", "attack_3.wav"}},
     [SOUND_PLAYER_DAMAGE] = {0.45f, 0.9f, PlayerDamage},
     [SOUND_ROUND_START] = {1.2f, 0.7f, RoundStart},
     [SOUND_ROUND_END] = {1.4f, 0.7f, RoundEnd},
@@ -219,14 +230,37 @@ static Wave Synthesize(const SoundDef *def, uint32_t seed)
     return (Wave){.frameCount = (unsigned int)frames, .sampleRate = SAMPLE_RATE, .sampleSize = 16, .channels = 1, .data = pcm};
 }
 
+static int LoadFileWaves(const SoundDef *def, Wave *waves)
+{
+    int count = 0;
+    while (count < MAX_VARIANTS && def->files[count] != NULL) {
+        waves[count] = LoadWave(TextFormat("%sassets/%s", GetApplicationDirectory(), def->files[count]));
+        if (!IsWaveValid(waves[count])) break;
+        count++;
+    }
+    int wanted = 0;
+    while (wanted < MAX_VARIANTS && def->files[wanted] != NULL) wanted++;
+    if (count == wanted) return count;
+    for (int i = 0; i < count; i++) UnloadWave(waves[i]);
+    return 0;
+}
+
 static void LoadBank(SoundId id)
 {
-    Wave wave = Synthesize(&SOUNDS[id], 0x9E3779B9u + (uint32_t)id);
+    const SoundDef *def = &SOUNDS[id];
     VoiceBank *bank = &g_bank[id];
-    bank->voices[0] = LoadSoundFromWave(wave);
-    UnloadWave(wave);
-    SetSoundVolume(bank->voices[0], SOUNDS[id].volume);
-    for (int v = 1; v < VOICES; v++) bank->voices[v] = LoadSoundAlias(bank->voices[0]);
+    Wave waves[MAX_VARIANTS];
+    bank->variants = LoadFileWaves(def, waves);
+    if (bank->variants == 0) {
+        waves[0] = Synthesize(def, 0x9E3779B9u + (uint32_t)id);
+        bank->variants = 1;
+    }
+    for (int i = 0; i < bank->variants; i++) {
+        bank->voices[i][0] = LoadSoundFromWave(waves[i]);
+        UnloadWave(waves[i]);
+        SetSoundVolume(bank->voices[i][0], def->volume);
+        for (int v = 1; v < VOICES; v++) bank->voices[i][v] = LoadSoundAlias(bank->voices[i][0]);
+    }
 }
 
 void AudioInit(void)
@@ -241,9 +275,11 @@ static bool SoundFor(const GameEvent *event, SoundId *out)
 {
     switch (event->kind) {
     case EVENT_FIRE:
-        *out = event->arg == WEAPON_SMG ? SOUND_FIRE_SMG : (event->arg == WEAPON_SHOTGUN ? SOUND_FIRE_SHOTGUN : SOUND_FIRE_PISTOL);
+        *out = (SoundId)(SOUND_FIRE_PISTOL + event->arg);
         return true;
-    case EVENT_RELOAD: *out = SOUND_RELOAD; return true;
+    case EVENT_RELOAD:
+        *out = (SoundId)(SOUND_RELOAD_PISTOL + event->arg);
+        return true;
     case EVENT_HIT: *out = SOUND_HIT; return true;
     case EVENT_KILL: *out = SOUND_KILL; return true;
     case EVENT_HEADSHOT_KILL: *out = SOUND_HEADSHOT_KILL; return true;
@@ -263,16 +299,20 @@ void AudioPlayEvent(const GameEvent *event)
     SoundId id;
     if (!g_ready || !SoundFor(event, &id)) return;
     VoiceBank *bank = &g_bank[id];
-    PlaySound(bank->voices[bank->next]);
-    bank->next = (bank->next + 1) % VOICES;
+    int variant = bank->next_variant;
+    PlaySound(bank->voices[variant][bank->next_voice[variant]]);
+    bank->next_voice[variant] = (bank->next_voice[variant] + 1) % VOICES;
+    bank->next_variant = (variant + 1) % bank->variants;
 }
 
 void AudioShutdown(void)
 {
     if (!g_ready) return;
     for (int i = 0; i < SOUND_COUNT; i++) {
-        for (int v = 1; v < VOICES; v++) UnloadSoundAlias(g_bank[i].voices[v]);
-        UnloadSound(g_bank[i].voices[0]);
+        for (int variant = 0; variant < g_bank[i].variants; variant++) {
+            for (int v = 1; v < VOICES; v++) UnloadSoundAlias(g_bank[i].voices[variant][v]);
+            UnloadSound(g_bank[i].voices[variant][0]);
+        }
     }
     CloseAudioDevice();
     g_ready = false;
