@@ -42,6 +42,7 @@ On Linux it also needs the X11 and OpenGL development headers.
 - A 750 point door that opens the back room and its zombie spawns.
 - A 2500 point perk that raises max health from 100 to 250.
 - Health regenerates after 3 seconds without damage. Dying shows the game over screen, and R restarts.
+- Sound effects for each weapon, reload, hits and kills, zombie growls and attacks, player damage, round start and end, and purchases (with a buzz when you lack the points).
 
 ## Tests and smoke run
 
@@ -53,10 +54,22 @@ ctest --test-dir build --output-on-failure
 `zombies_test` drives the simulation headlessly with scripted input.
 `--smoke` opens the real window, plays a scripted bot for about 10 seconds and writes `smoke_1.png`, `smoke_2.png` and `smoke_3.png` to the working directory.
 
+## Sound sources and licenses
+
+Gun, reload and zombie sounds are clips from the files below, cut and converted by `tools/prepare_sounds.py` into `assets/`. Every other sound (hit, kill, headshot kill, player damage, round start and end, purchase, denied) is synthesized in `src/audio.c`, is original to this project and falls under its MIT license.
+A missing clip falls back to a synthesized sound. Without an audio device the game runs silently.
+
+| Clips | Source | Author | License |
+| --- | --- | --- | --- |
+| `fire_pistol`, `fire_smg`, `fire_shotgun` | [The Free Firearm Sound Library](https://opengameart.org/content/the-free-firearm-sound-library) (Colt 1911 `A_42P`, Carl Gustav M45 `G_31P`, Benelli Nova `O_21P`) | Ben Jaszczak, Brian Nelson, Kevin Heras, Matthew Nanney | [CC0](https://creativecommons.org/publicdomain/zero/1.0/) |
+| `reload_pistol`, `reload_smg`, `reload_shotgun` | [gun reload sounds](https://opengameart.org/content/gun-reload-sounds) | SpringySpringo | [CC0](https://creativecommons.org/publicdomain/zero/1.0/) |
+| `growl_1` to `growl_3`, `attack_1` to `attack_3` | [Zombies Sound Pack](https://opengameart.org/content/zombies-sound-pack) (`zombie-17`, `16`, `21`, `24`, `5`, `11`) | artisticdude | [CC0](https://creativecommons.org/publicdomain/zero/1.0/) |
+
 ## Layout
 
-- `src/game.h` and `src/game.c` hold the simulation and the static level tables. They make no window or input calls.
+- `src/game.h` and `src/game.c` hold the simulation and the static level tables. They make no window, input or audio calls. `GameUpdate` writes sound events to a fixed-size queue in `GameState`.
 - `src/render.c` draws the scene and HUD from a `const GameState *`.
+- `src/audio.c` turns those events into sounds. `assets/` holds the clips and is copied next to the executable at build time. `src/main.c` plays them after each sim step.
 - `src/main.c` reads input, runs the fixed-step loop and implements `--smoke`.
 - `tests/game_test.c` is the headless core-loop test.
 

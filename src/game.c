@@ -31,6 +31,9 @@
 #define DEFAULT_SEED 0x9E3779B9u
 #define PLAYER_MOVER (-1)
 #define VISIBILITY_EPSILON 0.01f
+#define GROWL_INTERVAL 5.0f
+#define GROWL_STAGGER 0.7f
+#define GROWL_STAGGER_SLOTS 7
 
 const WeaponDef WEAPONS[WEAPON_COUNT] = {
     [WEAPON_PISTOL] = {
@@ -251,6 +254,12 @@ bool GameInteractableVisible(const GameState *g, int index, Vector3 eye)
     return self.hit && NearestSolidDistance(g, ray) >= self.distance - VISIBILITY_EPSILON;
 }
 
+static void PushEvent(GameState *g, GameEventKind kind, int arg)
+{
+    if (g->event_count >= GAME_EVENT_CAPACITY) return;
+    g->events[g->event_count++] = (GameEvent){kind, arg};
+}
+
 static void DamageZombie(GameState *g, Zombie *z, float damage, bool headshot)
 {
     Player *p = &g->player;
@@ -260,8 +269,10 @@ static void DamageZombie(GameState *g, Zombie *z, float damage, bool headshot)
     if (z->health > 0.0f) {
         p->points += HIT_POINTS;
         p->hitmarker_kill = false;
+        PushEvent(g, EVENT_HIT, 0);
         return;
     }
+    PushEvent(g, headshot ? EVENT_HEADSHOT_KILL : EVENT_KILL, 0);
     p->points += headshot ? HEADSHOT_KILL_POINTS : KILL_POINTS;
     p->hitmarker_kill = true;
     g->kills++;
@@ -313,18 +324,21 @@ static void FireWeapon(GameState *g)
     slot->mag--;
     p->fire_cooldown = w->fire_interval;
     p->muzzle_timer = MUZZLE_FLASH_TIME;
+    PushEvent(g, EVENT_FIRE, (int)slot->id);
     for (int i = 0; i < w->pellets; i++) {
         Ray ray = {PlayerEye(p), PelletDirection(g, w->spread)};
         CastShot(g, ray, w->damage);
     }
 }
 
-static void StartReload(Player *p)
+static void StartReload(GameState *g)
 {
+    Player *p = &g->player;
     const WeaponSlot *slot = &p->slots[p->active];
     const WeaponDef *w = &WEAPONS[slot->id];
     if (p->reload_timer > 0.0f || slot->mag >= w->mag_size || slot->reserve <= 0) return;
     p->reload_timer = w->reload_time;
+    PushEvent(g, EVENT_RELOAD, (int)slot->id);
 }
 
 static void FinishReload(Player *p)
@@ -356,7 +370,7 @@ static void UpdateWeapon(GameState *g, const FrameInput *in, float dt)
         p->reload_timer = 0.0f;
         p->fire_cooldown = fmaxf(p->fire_cooldown, SWAP_TIME);
     }
-    if (in->reload_pressed) StartReload(p);
+    if (in->reload_pressed) StartReload(g);
 
     const WeaponSlot *slot = &p->slots[p->active];
     bool trigger = WEAPONS[slot->id].automatic ? in->fire_held : in->fire_pressed;
@@ -364,7 +378,7 @@ static void UpdateWeapon(GameState *g, const FrameInput *in, float dt)
     if (slot->mag > 0) {
         FireWeapon(g);
     } else {
-        StartReload(p);
+        StartReload(g);
     }
 }
 
@@ -456,6 +470,7 @@ static bool SpawnZombie(GameState *g)
         .max_health = health,
         .speed = RoundZombieSpeed(g),
         .attack_timer = 0.6f,
+        .growl_timer = GROWL_INTERVAL + GROWL_STAGGER * (float)((slot - g->zombies) % GROWL_STAGGER_SLOTS),
         .zone = LEVEL_SPAWNS[spawn].zone,
     };
     return true;
@@ -474,6 +489,7 @@ static void DamagePlayer(GameState *g, float amount)
     p->health -= amount;
     p->time_since_damage = 0.0f;
     p->damage_flash = DAMAGE_FLASH_TIME;
+    PushEvent(g, EVENT_PLAYER_DAMAGE, 0);
     if (p->health > 0.0f) return;
     p->health = 0.0f;
     g->rounds_survived = g->round_number;
@@ -536,10 +552,16 @@ static void UpdateZombie(GameState *g, int index, float dt)
     Vector3 to_player = Vector3Subtract(g->player.pos, z->pos);
     float distance = Vector3Length(to_player);
     z->attack_timer -= dt;
+    z->growl_timer -= dt;
+    if (z->growl_timer <= 0.0f) {
+        PushEvent(g, EVENT_ZOMBIE_GROWL, index);
+        z->growl_timer = GROWL_INTERVAL;
+    }
     if (z->state == ZOMBIE_CHASE) {
         if (z->attack_timer > 0.0f || distance > ATTACK_RANGE) return;
         z->state = ZOMBIE_ATTACK;
         z->attack_timer = ATTACK_WINDUP;
+        PushEvent(g, EVENT_ZOMBIE_ATTACK, index);
         z->yaw = atan2f(to_player.x, -to_player.z);
     } else if (z->attack_timer <= 0.0f) {
         if (distance <= ATTACK_RANGE) DamagePlayer(g, ZOMBIE_DAMAGE);
@@ -560,6 +582,7 @@ static void StartRound(GameState *g)
 {
     g->zombies_left_to_spawn = RoundZombieCount(g->round_number);
     g->spawn_timer = FIRST_SPAWN_DELAY;
+    PushEvent(g, EVENT_ROUND_START, g->round_number);
     EnterPhase(g, PHASE_ROUND_ACTIVE);
 }
 
@@ -582,6 +605,7 @@ static void UpdateRound(GameState *g, float dt)
     case PHASE_ROUND_ACTIVE:
         UpdateSpawner(g, dt);
         if (g->zombies_left_to_spawn == 0 && GameAliveZombies(g) == 0) {
+            PushEvent(g, EVENT_ROUND_END, g->round_number);
             g->round_number++;
             EnterPhase(g, PHASE_INTERMISSION);
         }
@@ -684,13 +708,18 @@ static void UpdateInteraction(GameState *g, const FrameInput *in)
     int index = GameNearestInteractable(g);
     if (index < 0) return;
     int cost = GameDescribeInteractable(g, index).cost;
-    if (g->player.points < cost) return;
+    if (g->player.points < cost) {
+        PushEvent(g, EVENT_PURCHASE_DENIED, index);
+        return;
+    }
+    PushEvent(g, EVENT_PURCHASE, index);
     g->player.points -= cost;
     ApplyInteraction(g, &LEVEL_INTERACTABLES[index]);
 }
 
 void GameUpdate(GameState *g, const FrameInput *in, float dt)
 {
+    g->event_count = 0;
     g->phase_timer += dt;
     if (g->phase == PHASE_GAME_OVER) {
         for (int i = 0; i < MAX_ZOMBIES; i++) TickZombieTimers(&g->zombies[i], dt);

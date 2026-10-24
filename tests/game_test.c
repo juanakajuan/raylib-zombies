@@ -838,6 +838,162 @@ static void TestDoorwayControlsTheViewIntoTheFrontRoom(void)
     CHECK(GameInteractableVisible(&g, perk_item, lined_up), "an open doorway must show the perk");
 }
 
+static int CountEvents(const GameState *g, GameEventKind kind)
+{
+    int count = 0;
+    for (int i = 0; i < g->event_count; i++) count += g->events[i].kind == kind;
+    return count;
+}
+
+static const GameEvent *FindEvent(const GameState *g, GameEventKind kind)
+{
+    for (int i = 0; i < g->event_count; i++) {
+        if (g->events[i].kind == kind) return &g->events[i];
+    }
+    return NULL;
+}
+
+/* Steps until the event shows up in a step's queue, up to max_steps. */
+static bool EventWithin(GameState *g, FrameInput in, GameEventKind kind, int max_steps)
+{
+    for (int i = 0; i < max_steps; i++) {
+        GameUpdate(g, &in, DT);
+        if (CountEvents(g, kind) > 0) return true;
+    }
+    return false;
+}
+
+static void TestFireAndReloadEvents(void)
+{
+    FrameInput fire = {.fire_pressed = true, .fire_held = true};
+    FrameInput idle = {0};
+    FrameInput reload = {.reload_pressed = true};
+
+    for (int id = 0; id < WEAPON_COUNT; id++) {
+        GameState g = NewActiveGame();
+        g.player.slots[0] = (WeaponSlot){(WeaponId)id, WEAPONS[id].mag_size, WEAPONS[id].reserve_max};
+        Press(&g, fire);
+        const GameEvent *e = FindEvent(&g, EVENT_FIRE);
+        CHECK(CountEvents(&g, EVENT_FIRE) == 1 && e != NULL && e->arg == id, "weapon %d fire events=%d", id, CountEvents(&g, EVENT_FIRE));
+        Press(&g, idle);
+        CHECK(CountEvents(&g, EVENT_FIRE) == 0, "weapon %d: the queue must be empty on the next step", id);
+    }
+
+    GameState g = NewActiveGame();
+    g.player.slots[0].mag = 0;
+    Press(&g, fire);
+    CHECK(CountEvents(&g, EVENT_FIRE) == 0, "an empty magazine must not fire");
+    CHECK(CountEvents(&g, EVENT_RELOAD) == 1, "an empty magazine starts a reload, events=%d", CountEvents(&g, EVENT_RELOAD));
+
+    GameState full = NewActiveGame();
+    Press(&full, reload);
+    CHECK(CountEvents(&full, EVENT_RELOAD) == 0, "a full magazine has no reload");
+
+    GameState manual = NewActiveGame();
+    manual.player.slots[0].mag = 3;
+    Press(&manual, reload);
+    CHECK(CountEvents(&manual, EVENT_RELOAD) == 1, "manual reload events=%d", CountEvents(&manual, EVENT_RELOAD));
+    Press(&manual, reload);
+    CHECK(CountEvents(&manual, EVENT_RELOAD) == 0, "a reload in progress must not start another");
+}
+
+static void TestHitAndKillEvents(void)
+{
+    FrameInput fire = {.fire_pressed = true};
+    struct {
+        float health;
+        float aim_height;
+        GameEventKind expected;
+    } cases[] = {
+        {150.0f, 0.7f, EVENT_HIT},
+        {30.0f, 0.7f, EVENT_KILL},
+        {150.0f, 1.65f, EVENT_HIT},
+        {70.0f, 1.65f, EVENT_HEADSHOT_KILL},
+    };
+    for (int c = 0; c < (int)(sizeof cases / sizeof cases[0]); c++) {
+        GameState g = NewActiveGame();
+        Zombie *z = PlaceZombie(&g, (Vector3){0.0f, 0.0f, 4.0f}, cases[c].health);
+        AimAt(&g.player, (Vector3){z->pos.x, cases[c].aim_height, z->pos.z});
+        Press(&g, fire);
+        int total = CountEvents(&g, EVENT_HIT) + CountEvents(&g, EVENT_KILL) + CountEvents(&g, EVENT_HEADSHOT_KILL);
+        CHECK(CountEvents(&g, cases[c].expected) == 1 && total == 1, "case %d: expected event %d, hit/kill/headshot=%d/%d/%d", c,
+              (int)cases[c].expected, CountEvents(&g, EVENT_HIT), CountEvents(&g, EVENT_KILL), CountEvents(&g, EVENT_HEADSHOT_KILL));
+    }
+
+    GameState miss = NewActiveGame();
+    PlaceZombie(&miss, (Vector3){0.0f, 0.0f, 4.0f}, 150.0f);
+    miss.player.yaw = 3.14159265f;
+    Press(&miss, fire);
+    CHECK(CountEvents(&miss, EVENT_HIT) == 0, "a miss must not play a hit");
+}
+
+static void TestZombieAndPlayerDamageEvents(void)
+{
+    FrameInput idle = {0};
+    GameState g = NewActiveGame();
+    Zombie *z = PlaceZombie(&g, (Vector3){0.0f, 0.0f, 9.0f}, 150.0f);
+    z->attack_timer = 0.0f;
+    z->growl_timer = 1.0f;
+
+    CHECK(!EventWithin(&g, idle, EVENT_ZOMBIE_GROWL, 30), "a growl must wait for its timer");
+    GameState later = NewActiveGame();
+    Zombie *growler = PlaceZombie(&later, (Vector3){0.0f, 0.0f, -8.0f}, 150.0f);
+    growler->growl_timer = 1.0f;
+    CHECK(EventWithin(&later, idle, EVENT_ZOMBIE_GROWL, 70), "no growl after the timer expired");
+    const GameEvent *growl = FindEvent(&later, EVENT_ZOMBIE_GROWL);
+    CHECK(growl != NULL && growl->arg == (int)(growler - later.zombies), "growl names the zombie, arg=%d", growl ? growl->arg : -1);
+
+    GameState fight = NewActiveGame();
+    Zombie *biter = PlaceZombie(&fight, (Vector3){0.0f, 0.0f, 9.0f}, 150.0f);
+    biter->attack_timer = 0.0f;
+    CHECK(EventWithin(&fight, idle, EVENT_ZOMBIE_ATTACK, 60), "no attack event when a zombie starts to bite");
+    CHECK(CountEvents(&fight, EVENT_PLAYER_DAMAGE) == 0, "damage must wait for the wind-up end");
+    CHECK(EventWithin(&fight, idle, EVENT_PLAYER_DAMAGE, 60), "no damage event when the bite lands");
+}
+
+static void TestRoundEvents(void)
+{
+    FrameInput idle = {0};
+    GameState g;
+    GameInit(&g, 5);
+    g.phase_timer = INTERMISSION_TIME;
+    Press(&g, idle);
+    const GameEvent *start = FindEvent(&g, EVENT_ROUND_START);
+    CHECK(start != NULL && start->arg == 1 && g.phase == PHASE_ROUND_ACTIVE, "round start event=%d phase=%d", start != NULL, (int)g.phase);
+    CHECK(CountEvents(&g, EVENT_ROUND_END) == 0, "round end must wait for the clear");
+
+    g.zombies_left_to_spawn = 0;
+    Press(&g, idle);
+    const GameEvent *end = FindEvent(&g, EVENT_ROUND_END);
+    CHECK(end != NULL && end->arg == 1 && g.round_number == 2, "round end event=%d round=%d", end != NULL, g.round_number);
+    Press(&g, idle);
+    CHECK(CountEvents(&g, EVENT_ROUND_END) == 0 && CountEvents(&g, EVENT_ROUND_START) == 0, "round events must fire once");
+}
+
+static void TestPurchaseEvents(void)
+{
+    int door_item = FindInteractable(INTERACT_DOOR, -1);
+    int cost = LEVEL_DOORS[LEVEL_INTERACTABLES[door_item].payload].cost;
+    FrameInput interact = {.interact_pressed = true};
+    GameState g = NewActiveGame();
+    StandNear(&g, door_item);
+
+    g.player.points = cost - 1;
+    Press(&g, interact);
+    CHECK(CountEvents(&g, EVENT_PURCHASE_DENIED) == 1 && CountEvents(&g, EVENT_PURCHASE) == 0, "short on points: denied=%d purchase=%d",
+          CountEvents(&g, EVENT_PURCHASE_DENIED), CountEvents(&g, EVENT_PURCHASE));
+
+    g.player.points = cost;
+    Press(&g, interact);
+    CHECK(CountEvents(&g, EVENT_PURCHASE) == 1 && CountEvents(&g, EVENT_PURCHASE_DENIED) == 0, "enough points: denied=%d purchase=%d",
+          CountEvents(&g, EVENT_PURCHASE_DENIED), CountEvents(&g, EVENT_PURCHASE));
+
+    GameState far = NewActiveGame();
+    far.player.points = 0;
+    Press(&far, interact);
+    CHECK(CountEvents(&far, EVENT_PURCHASE_DENIED) == 0, "pressing E with nothing in reach must be silent");
+}
+
 int main(void)
 {
     TestInit();
@@ -860,6 +1016,11 @@ int main(void)
     TestInteractablesAreVisibleInPlainView();
     TestPartitionHidesTheFrontRoomFromTheBackRoom();
     TestDoorwayControlsTheViewIntoTheFrontRoom();
+    TestFireAndReloadEvents();
+    TestHitAndKillEvents();
+    TestZombieAndPlayerDamageEvents();
+    TestRoundEvents();
+    TestPurchaseEvents();
 
     if (g_failures > 0) {
         fprintf(stderr, "%d of %d checks failed\n", g_failures, g_checks);

@@ -7,6 +7,7 @@
 #include "raymath.h"
 #include "rlgl.h"
 
+#include "audio.h"
 #include "game.h"
 #include "render.h"
 
@@ -83,6 +84,7 @@ static void AdvanceSim(GameState *g, SimClock *clock, const FrameInput *fresh, f
     clock->accumulator += fminf(frame_dt, MAX_FRAME_TIME);
     while (clock->accumulator >= SIM_DT) {
         GameUpdate(g, &clock->pending, SIM_DT);
+        for (int i = 0; i < g->event_count; i++) AudioPlayEvent(&g->events[i]);
         ClearOneShots(&clock->pending);
         clock->accumulator -= SIM_DT;
     }
@@ -320,7 +322,9 @@ int main(int argc, char **argv)
     InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Zombies");
     SetDisplayMode(smoke ? DISPLAY_WINDOWED : mode);
     SetTargetFPS(TARGET_FPS);
+    AudioInit();
     int status = smoke ? RunSmoke() : RunGame();
+    AudioShutdown();
     CloseWindow();
     return status;
 }

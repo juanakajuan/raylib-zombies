@@ -25,6 +25,7 @@
 #define DAMAGE_FLASH_TIME 0.35f
 #define ZOMBIE_HIT_FLASH_TIME 0.12f
 #define WALL_HEIGHT 3.5f
+#define GAME_EVENT_CAPACITY 64
 
 typedef struct FrameInput {
     Vector2 move; /* x strafes right, y moves forward, length <= 1 */
@@ -109,6 +110,7 @@ typedef struct Zombie {
     float attack_timer;
     float dying_timer;
     float hit_flash;
+    float growl_timer;
     int zone;
 } Zombie;
 
@@ -159,6 +161,26 @@ extern const int LEVEL_SPAWN_COUNT;
 extern const Interactable LEVEL_INTERACTABLES[];
 extern const int LEVEL_INTERACTABLE_COUNT;
 
+typedef enum GameEventKind {
+    EVENT_FIRE, /* arg is the WeaponId */
+    EVENT_RELOAD,
+    EVENT_HIT,
+    EVENT_KILL,
+    EVENT_HEADSHOT_KILL,
+    EVENT_ZOMBIE_GROWL,
+    EVENT_ZOMBIE_ATTACK,
+    EVENT_PLAYER_DAMAGE,
+    EVENT_ROUND_START,
+    EVENT_ROUND_END,
+    EVENT_PURCHASE,
+    EVENT_PURCHASE_DENIED,
+} GameEventKind;
+
+typedef struct GameEvent {
+    GameEventKind kind;
+    int arg;
+} GameEvent;
+
 typedef struct GameState {
     Player player;
     Zombie zombies[MAX_ZOMBIES];
@@ -172,6 +194,9 @@ typedef struct GameState {
     int kills;
     int rounds_survived;
     uint32_t rng_state;
+    /* Filled by GameUpdate, which empties it first. The caller drains it after each step. Events past capacity are dropped. */
+    GameEvent events[GAME_EVENT_CAPACITY];
+    int event_count;
 } GameState;
 
 void GameInit(GameState *g, uint32_t seed);
