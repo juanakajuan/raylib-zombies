@@ -21,8 +21,8 @@ Preconditions:
 
 - A fresh game from `zv launch --run wallbuy-1`; `zv doctor --run wallbuy-1` prints `OK`.
 
-- **Reach the MP5K.** Run `zv key a --hold 2.0 && zv key w --hold 0.65 && zv shot 01-mp5k-locked --crop prompt`. The prompt reads `Press E to buy MP5K [1000]` in red.
-- **Earn and buy.** In one shell command run `zv hunt --seconds 90 --until-clear --stay --restore-view && zv shot 02-round-cleared --crop points && zv key e && sleep 0.3 && zv shot 03-mp5k-bought --crop points && zv shot 04-mp5k-hud --crop weapon`. Shot 02 shows at least 1000 points and a white prompt. Shot 03 shows points lower by exactly 1000. Shot 04 shows `MP5K`, `32 / 192` and `[Q] M1911`.
+- **Reach the MP5K.** In a throwaway first run, run `zv key a --hold 2.0 && zv key w --hold 0.65 && zv shot 01-mp5k-locked --crop prompt`. The prompt reads `Press E to buy MP5K [1000]` in red.
+- **Earn and buy.** Hunt in the open first, then walk to the panel. In one shell command run `zv hunt --seconds 100 --until-clear --restore-view && zv shot 02-round-cleared --crop points && zv key a --hold 2.0 && zv key w --hold 0.65 && zv key e && sleep 0.3 && zv shot 03-mp5k-bought --crop points && zv shot 04-mp5k-hud --crop weapon`. Shot 02 shows at least 1000 points. Shot 03 shows points lower by exactly 1000. Shot 04 shows `MP5K`, `32 / 192` and `[Q] M1911`.
 - **Automatic fire.** Hold fire. Run `zv click --hold 1.0 && zv shot 05-mp5k-auto --crop weapon`. The magazine drops by about 11 (one round per 0.085 s), not by 1.
 - **Refill.** At the same panel run `zv shot 06-refill-prompt --crop prompt`. The prompt reads `Press E to refill ammo for MP5K [1000]`.
 - **Swap.** Press Q. Run `zv key q && sleep 0.4 && zv shot 07-swapped --crop weapon`. The HUD shows `M1911` and `[Q] MP5K`.
@@ -31,8 +31,8 @@ Preconditions:
 
 ## Gotchas
 
-- The prompt shows only within 2.6 m of a panel. A step back during a hunt can leave that radius, so use `--stay`.
-- After `--until-clear` the intermission lasts 5 s. Press E inside it, in the same shell command.
+- The prompt shows only within 2.6 m of a panel. Do not hunt while standing at a panel with `--stay`: the bot died in round 1 at the door in 3 of 3 attempts. Hunt in the open and walk to the panel after the round clears (verified: 1160 to 160 points, `32 / 192`).
+- After `--until-clear` the intermission lasts 5 s. The walk to the panel takes about 2.7 s, so keep it in the same shell command as the hunt.
 - A full owned weapon shows no prompt at its panel. Fire a few rounds first to see the refill prompt.
 - `hunt` assumes the M1911 (`--mag 8`, one click per shot). With the MP5K in hand pass `--mag 32 --fire-interval 0.1`.
 - The bot often dies in round 2 or 3. A shotgun journey that dies before 1500 points is a failed run, not a pass.

@@ -21,14 +21,13 @@ Preconditions:
 
 - **Reach the door.** Walk forward. Run `zv key w --hold 2.5` then `zv shot 01-door-locked --crop prompt`. The prompt reads `Press E to open the door [750]` in red and the door fills the view.
 - **Refuse when poor.** Press E with 500 points. Run `zv key e` then `zv shot 02-refused --crop points`. Points still read `500` and the door is still there.
-- **Earn points and buy.** In one shell command run `zv hunt --seconds 90 --until-clear --stay --restore-view && zv shot 03-round-cleared --crop points && zv key e && sleep 0.3 && zv shot 04-door-bought --crop points`. Hunt ends with `stop=red banner`. Shot 03 shows `ROUND 2`, the white prompt and at least 750 points. Shot 04 shows points lower by exactly 750 and the back room (blue tiled floor, far wall) where the door was.
+- **Earn points and buy.** Stop `door-1` and launch a fresh `door-2`. Hunt in the open first, then walk to the door. In one shell command run `zv hunt --seconds 100 --until-clear --restore-view && zv shot 03-round-cleared --crop points && zv key w --hold 2.5 && zv shot 03b-prompt --crop prompt && zv key e && sleep 0.3 && zv shot 04-door-bought --crop points`. Hunt ends with `stop=red banner`. Shot 03 shows `ROUND 2` and at least 750 points. Shot 03b shows the white prompt. Shot 04 shows points lower by exactly 750 and the back room (blue tiled floor, far wall) where the door was. The buy also works after round 2 has started; there is no phase gate.
 - **Enter the back room.** Walk forward. Run `zv key w --hold 2.0` then `zv shot 05-in-back-room`. The floor under the view is blue tiled, and no door prompt shows.
-- **Proof.** Stop with `zv stop --run door-1`. Report shots 01 to 05 and `actions.log` from `verify-artifacts/door-1/`.
+- **Proof.** Stop with `zv stop --run door-2`. Report shots 01 and 02 from `verify-artifacts/door-1/`, shots 03 to 05 from `verify-artifacts/door-2/`, and both `actions.log` files.
 
 ## Gotchas
 
-- The hunt bot must not step back here (`--stay`): a step back can move the player out of the 3 m prompt radius.
-- `--restore-view` turns back to face the door. Without it the purchase prompt can still show, but shots 04 and 05 do not look through the doorway.
+- Do not hunt from the door with `--stay`. In a 2026-10 pass the bot died in round 1 in 3 of 3 attempts when it stood at the door (840, 1070 and 840 points, never the round clear). Hunting in the open from the start position and then walking to the door cleared round 1 with 1160 points.
+- `--restore-view` turns the view back to the start direction, so the walk to the door in the buy command is straight ahead.
 - If shot 03 shows `GAME OVER` instead of `ROUND 2`, the bot died. Stop, launch a new run and try again. Do not report the purchase as verified.
-- With `--stay` the zombies reach the player. Health can drop near 0 before the round clears; the purchase is still valid if the shot shows `ROUND 2`.
-- Round 1 usually ends with 1100 to 1300 points. The exact value depends on hits and headshots.
+- Round 1 usually ends with 1100 to 1300 points (about 114 per kill measured: 1160 in the verified run). The exact value depends on hits and headshots.
