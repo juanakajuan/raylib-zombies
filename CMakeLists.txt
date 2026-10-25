@@ -19,7 +19,7 @@ function(zombies_strict target)
     target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
 endfunction()
 
-add_library(game_core STATIC src/game.c)
+add_library(game_core STATIC src/game.c src/settings.c)
 target_include_directories(game_core PUBLIC src)
 target_link_libraries(game_core PUBLIC raylib m)
 zombies_strict(game_core)
