@@ -1,6 +1,6 @@
 # Game over and restart
 
-Zombies hit for 40 damage. At 0 health the game shows a dim red `GAME OVER` screen with `You survived N rounds` and `Kills: K`. After 1.5 s it adds `Press R to restart`, and R starts a fresh game: round 1, 500 points, M1911 only, door shut.
+Zombies hit for 40 damage. At 0 health the game dims the screen, lowers the camera to the floor over 0.5 s and shows a red `GAME OVER` title with `You survived N rounds` and `Kills: K`. After 1.5 s it adds `Press R to restart`, and R starts a fresh game: round 1, 500 points, M1911 only, door shut.
 
 ## Sub-features
 

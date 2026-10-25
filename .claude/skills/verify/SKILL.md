@@ -75,7 +75,7 @@ Map and movement facts (from `src/game.c`): the player starts at the centre of t
 | Door to the back room | `zv key w --hold 2.5` | `Press E to open the door [750]` |
 | Vitality Brew perk (blue machine, back right corner) | `zv key d --hold 2.0` then `zv key s --hold 0.6` | `Press E to drink Vitality Brew [2500]` |
 
-The prompt text is red when the player cannot afford it and white when it can. Points come only from shooting zombies: 10 per hit, 60 per kill, 100 per headshot kill. A full round 1 with `hunt` typically gives 1100 to 1300 points. To buy, walk to the spot first, then `hunt --until-clear --stay --restore-view` from there, then press `e` during the 5 s intermission. Chain these in one shell command: a pause between tool calls lets zombies kill the player.
+The prompt text is red when the player cannot afford it and white when it can. Points come only from shooting zombies: 10 per hit, 60 per kill, 100 per headshot kill. A full round 1 with `hunt` typically gives 1100 to 1300 points. To buy, run `hunt --until-clear --restore-view` in the open from the start position, then walk to the spot and press `e` (hunting with `--stay` while standing at a purchase spot got the bot killed in round 1 in most attempts). Chain these in one shell command: a pause between tool calls lets zombies kill the player.
 
 ## Evidence
 
