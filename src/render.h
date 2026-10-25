@@ -2,8 +2,11 @@
 #define RENDER_H
 
 #include "game.h"
+#include "settings.h"
 
-void GameDraw(const GameState *g);
-void DrawPauseOverlay(void);
+void GameDraw(const GameState *g, float fov_degrees);
+void DrawPauseOverlay(const Settings *settings, int selected);
+Rectangle PauseRowBounds(int row);
+Rectangle PauseBarBounds(int row);
 
 #endif

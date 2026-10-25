@@ -2,3 +2,4 @@ build/
 *.png
 verify-artifacts/
 __pycache__/
+settings.cfg

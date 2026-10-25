@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "game.h"
+#include "settings.h"
 
 #define DT (1.0f / 60.0f)
 
@@ -994,6 +995,111 @@ static void TestPurchaseEvents(void)
     CHECK(CountEvents(&far, EVENT_PURCHASE_DENIED) == 0, "pressing E with nothing in reach must be silent");
 }
 
+static bool SettingsEqual(const Settings *a, const Settings *b)
+{
+    for (int i = 0; i < SETTING_COUNT; i++) {
+        if (fabsf(SettingsGet(a, (SettingId)i) - SettingsGet(b, (SettingId)i)) > 0.001f) return false;
+    }
+    return true;
+}
+
+static void TestSettingsDefaultsAndAdjust(void)
+{
+    Settings s = SettingsDefault();
+    CHECK(fabsf(s.volume - 0.8f) < 1e-6f && fabsf(s.sensitivity - 1.0f) < 1e-6f && fabsf(s.fov - 75.0f) < 1e-6f,
+          "defaults: volume=%f sensitivity=%f fov=%f", (double)s.volume, (double)s.sensitivity, (double)s.fov);
+
+    for (int i = 0; i < SETTING_COUNT; i++) {
+        const SettingDef *def = SettingsDef((SettingId)i);
+        Settings up = SettingsDefault();
+        Settings down = SettingsDefault();
+        for (int n = 0; n < 200; n++) {
+            SettingsAdjust(&up, (SettingId)i, 1);
+            SettingsAdjust(&down, (SettingId)i, -1);
+        }
+        CHECK(SettingsGet(&up, (SettingId)i) == def->max, "%s clamps at max: %f", def->name, (double)SettingsGet(&up, (SettingId)i));
+        CHECK(SettingsGet(&down, (SettingId)i) == def->min, "%s clamps at min: %f", def->name, (double)SettingsGet(&down, (SettingId)i));
+
+        Settings one = SettingsDefault();
+        SettingsAdjust(&one, (SettingId)i, 1);
+        CHECK(fabsf(SettingsGet(&one, (SettingId)i) - def->default_value - def->step) < 1e-4f ||
+                  SettingsGet(&one, (SettingId)i) == def->max,
+              "%s steps by %f: %f", def->name, (double)def->step, (double)SettingsGet(&one, (SettingId)i));
+    }
+
+    Settings other = SettingsDefault();
+    SettingsAdjust(&other, SETTING_FOV, 1);
+    CHECK(other.volume == s.volume && other.sensitivity == s.sensitivity, "adjusting fov must leave the other settings alone");
+}
+
+static void TestSettingsSetRatio(void)
+{
+    Settings s = SettingsDefault();
+    SettingsSetRatio(&s, SETTING_FOV, 0.0f);
+    CHECK(s.fov == 60.0f, "ratio 0 sets min: %f", (double)s.fov);
+    SettingsSetRatio(&s, SETTING_FOV, 1.0f);
+    CHECK(s.fov == 110.0f, "ratio 1 sets max: %f", (double)s.fov);
+    SettingsSetRatio(&s, SETTING_FOV, 0.52f);
+    CHECK(s.fov == 85.0f, "ratio snaps to the 5 degree step: %f", (double)s.fov);
+    SettingsSetRatio(&s, SETTING_FOV, -3.0f);
+    CHECK(s.fov == 60.0f, "ratio below 0 clamps: %f", (double)s.fov);
+    SettingsSetRatio(&s, SETTING_VOLUME, 7.0f);
+    CHECK(s.volume == 1.0f && s.fov == 60.0f, "ratio above 1 clamps and leaves other settings alone");
+}
+
+static void TestSettingsParse(void)
+{
+    Settings s;
+    Settings defaults = SettingsDefault();
+
+    CHECK(SettingsParse("volume=0.5\nsensitivity=2.0\nfov=90\n", &s), "valid text reports success");
+    CHECK(fabsf(s.volume - 0.5f) < 1e-6f && fabsf(s.sensitivity - 2.0f) < 1e-6f && fabsf(s.fov - 90.0f) < 1e-6f,
+          "valid text: volume=%f sensitivity=%f fov=%f", (double)s.volume, (double)s.sensitivity, (double)s.fov);
+
+    CHECK(SettingsParse("fov=100", &s), "a key without a trailing newline still parses");
+    CHECK(s.fov == 100.0f && s.volume == defaults.volume && s.sensitivity == defaults.sensitivity,
+          "partial text keeps defaults for missing keys: fov=%f volume=%f", (double)s.fov, (double)s.volume);
+
+    CHECK(!SettingsParse("garbage\n=\nvolume\nvolume=abc\nfov=\nunknown=5\n\n===\n", &s), "garbage reports no keys read");
+    CHECK(SettingsEqual(&s, &defaults), "garbage leaves defaults");
+
+    CHECK(SettingsParse("unknown=5\nvolume=0.3\r\nfov=70x\n", &s) && fabsf(s.volume - 0.3f) < 1e-6f && s.fov == defaults.fov,
+          "unknown keys and malformed values are skipped, CRLF is accepted: volume=%f fov=%f", (double)s.volume, (double)s.fov);
+
+    SettingsParse("volume=7\nsensitivity=-4\nfov=500\n", &s);
+    CHECK(s.volume == 1.0f && s.sensitivity == 0.2f && s.fov == 110.0f, "out-of-range values clamp: volume=%f sensitivity=%f fov=%f",
+          (double)s.volume, (double)s.sensitivity, (double)s.fov);
+
+    SettingsParse("volume=nan\nfov=inf\n", &s);
+    CHECK(s.volume == defaults.volume && s.fov == 110.0f, "nan falls back to the default and inf clamps: volume=%f fov=%f", (double)s.volume,
+          (double)s.fov);
+
+    CHECK(!SettingsParse(NULL, &s) && SettingsEqual(&s, &defaults), "NULL text yields defaults");
+    CHECK(!SettingsParse("", &s) && SettingsEqual(&s, &defaults), "empty text yields defaults");
+    CHECK(!SettingsParse("volume=0.1", NULL), "NULL output is rejected");
+}
+
+static void TestSettingsFormatRoundTrip(void)
+{
+    Settings original = SettingsDefault();
+    SettingsAdjust(&original, SETTING_VOLUME, -1);
+    SettingsAdjust(&original, SETTING_SENSITIVITY, 1);
+    SettingsAdjust(&original, SETTING_SENSITIVITY, 1);
+    SettingsAdjust(&original, SETTING_FOV, -1);
+
+    char buf[256];
+    int length = SettingsFormat(&original, buf, sizeof buf);
+    CHECK(length > 0 && (size_t)length == strlen(buf), "format length matches the text: %d vs %zu", length, strlen(buf));
+
+    Settings parsed;
+    CHECK(SettingsParse(buf, &parsed) && SettingsEqual(&original, &parsed), "format then parse restores the settings");
+
+    char tiny[8];
+    int needed = SettingsFormat(&original, tiny, sizeof tiny);
+    CHECK(needed == length && strlen(tiny) < sizeof tiny, "a small buffer is truncated, not overrun, and reports the full length: %d", needed);
+    CHECK(SettingsFormat(&original, NULL, 0) == length, "a NULL buffer only measures");
+}
+
 int main(void)
 {
     TestInit();
@@ -1021,6 +1127,10 @@ int main(void)
     TestZombieAndPlayerDamageEvents();
     TestRoundEvents();
     TestPurchaseEvents();
+    TestSettingsDefaultsAndAdjust();
+    TestSettingsSetRatio();
+    TestSettingsParse();
+    TestSettingsFormatRoundTrip();
 
     if (g_failures > 0) {
         fprintf(stderr, "%d of %d checks failed\n", g_failures, g_checks);

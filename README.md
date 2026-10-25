@@ -32,7 +32,12 @@ On Linux it also needs the X11 and OpenGL development headers.
 | Q | Swap weapon |
 | Shift | Sprint |
 | Esc | Pause and free the mouse. Esc again resumes, Q quits while paused |
+| Mouse, or Up / Down, Left / Right | While paused: hover or click a setting row and drag its bar, or select and change it with the arrows |
 | F11 or Alt+Enter | Switch between fullscreen and windowed |
+
+## Settings
+
+The pause menu lists volume (0 to 1), mouse sensitivity (0.2x to 3x) and field of view (60 to 110 degrees). Changes apply at once and are saved to `settings.cfg` in the working directory when you resume or quit. The file is plain `key=value` text. Unknown keys are ignored and out-of-range values are clamped. `--smoke` ignores the file and uses the defaults.
 
 ## Features
 
@@ -68,6 +73,7 @@ A missing clip falls back to a synthesized sound. Without an audio device the ga
 ## Layout
 
 - `src/game.h` and `src/game.c` hold the simulation and the static level tables. They make no window, input or audio calls. `GameUpdate` writes sound events to a fixed-size queue in `GameState`.
+- `src/settings.h` and `src/settings.c` hold the settings table (name, range, step, default) that drives clamping, parsing, saving and the pause menu rows.
 - `src/render.c` draws the scene and HUD from a `const GameState *`.
 - `src/audio.c` turns those events into sounds. `assets/` holds the clips and is copied next to the executable at build time. `src/main.c` plays them after each sim step.
 - `src/main.c` reads input, runs the fixed-step loop and implements `--smoke`.

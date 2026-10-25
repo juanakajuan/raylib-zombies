@@ -10,6 +10,7 @@
 #include "audio.h"
 #include "game.h"
 #include "render.h"
+#include "settings.h"
 
 #define WINDOW_WIDTH 1280
 #define WINDOW_HEIGHT 720
@@ -36,11 +37,12 @@ typedef struct SimClock {
     float accumulator;
 } SimClock;
 
-static FrameInput ReadInput(void)
+static FrameInput ReadInput(float sensitivity)
 {
     FrameInput in = {0};
     Vector2 mouse = GetMouseDelta();
-    in.look = (Vector2){mouse.x * MOUSE_SENSITIVITY, -mouse.y * MOUSE_SENSITIVITY};
+    float scale = MOUSE_SENSITIVITY * sensitivity;
+    in.look = (Vector2){mouse.x * scale, -mouse.y * scale};
     in.move.x = (float)(IsKeyDown(KEY_D) - IsKeyDown(KEY_A));
     in.move.y = (float)(IsKeyDown(KEY_W) - IsKeyDown(KEY_S));
     if (Vector2Length(in.move) > 1.0f) in.move = Vector2Normalize(in.move);
@@ -118,6 +120,48 @@ static bool DisplayTogglePressed(void)
     return IsKeyPressed(KEY_F11) || (alt && IsKeyPressed(KEY_ENTER));
 }
 
+static bool MenuKeyPressed(int key)
+{
+    return IsKeyPressed(key) || IsKeyPressedRepeat(key);
+}
+
+typedef struct SettingsMenu {
+    int selected;
+    int dragging; /* row whose bar the held mouse button grabbed, or -1 */
+} SettingsMenu;
+
+/* Returns true when a setting changed. A drag keeps its row until the button is released. */
+static bool UpdateSettingsMenu(Settings *settings, SettingsMenu *menu)
+{
+    Vector2 mouse = GetMousePosition();
+    bool changed = false;
+    menu->selected = (menu->selected + SETTING_COUNT + MenuKeyPressed(KEY_DOWN) - MenuKeyPressed(KEY_UP)) % SETTING_COUNT;
+    if (GetMouseDelta().x != 0.0f || GetMouseDelta().y != 0.0f) {
+        for (int i = 0; i < SETTING_COUNT; i++) {
+            if (CheckCollisionPointRec(mouse, PauseRowBounds(i))) menu->selected = i;
+        }
+    }
+    if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT)) menu->dragging = -1;
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        for (int i = 0; i < SETTING_COUNT; i++) {
+            if (CheckCollisionPointRec(mouse, PauseRowBounds(i))) menu->selected = i;
+            if (CheckCollisionPointRec(mouse, PauseBarBounds(i))) menu->dragging = i;
+        }
+    }
+    if (menu->dragging >= 0) {
+        Rectangle bar = PauseBarBounds(menu->dragging);
+        SettingsSetRatio(settings, (SettingId)menu->dragging, (mouse.x - bar.x) / bar.width);
+        menu->selected = menu->dragging;
+        changed = true;
+    }
+    int direction = MenuKeyPressed(KEY_RIGHT) - MenuKeyPressed(KEY_LEFT);
+    if (direction != 0) {
+        SettingsAdjust(settings, (SettingId)menu->selected, direction);
+        changed = true;
+    }
+    return changed;
+}
+
 /* Pause lives here, not in GamePhase: a paused loop just stops stepping the sim. */
 static int RunGame(void)
 {
@@ -126,6 +170,11 @@ static int RunGame(void)
     bool paused = false;
     bool quit = false;
     int discard_look_frames = LOOK_SETTLE_FRAMES;
+    Settings settings;
+    SettingsMenu menu = {.selected = 0, .dragging = -1};
+    bool settings_dirty = false;
+    SettingsLoad(&settings);
+    SetMasterVolume(settings.volume);
     GameInit(&game, (uint32_t)time(NULL));
     SetExitKey(KEY_NULL);
     DisableCursor();
@@ -141,13 +190,19 @@ static int RunGame(void)
             if (paused) {
                 EnableCursor();
             } else {
+                if (settings_dirty) SettingsSave(&settings);
+                settings_dirty = false;
                 DisableCursor();
                 discard_look_frames = LOOK_SETTLE_FRAMES;
             }
         }
         quit = paused && IsKeyPressed(KEY_Q);
+        if (paused && UpdateSettingsMenu(&settings, &menu)) {
+            settings_dirty = true;
+            SetMasterVolume(settings.volume);
+        }
         if (!paused) {
-            FrameInput in = ReadInput();
+            FrameInput in = ReadInput(settings.sensitivity);
             if (discard_look_frames > 0) {
                 in.look = Vector2Zero();
                 discard_look_frames--;
@@ -155,10 +210,11 @@ static int RunGame(void)
             AdvanceSim(&game, &clock, &in, GetFrameTime());
         }
         BeginDrawing();
-        GameDraw(&game);
-        if (paused) DrawPauseOverlay();
+        GameDraw(&game, settings.fov);
+        if (paused) DrawPauseOverlay(&settings, menu.selected);
         EndDrawing();
     }
+    if (settings_dirty) SettingsSave(&settings);
     return 0;
 }
 
@@ -278,6 +334,7 @@ static int RunSmoke(void)
     GameState game;
     SimClock clock = {0};
     SmokeBot bot = {0};
+    Settings defaults = SettingsDefault();
     GameInit(&game, SMOKE_SEED);
     game.player.points = SMOKE_POINTS;
     game.phase_timer = INTERMISSION_TIME - 1.0f;
@@ -286,7 +343,7 @@ static int RunSmoke(void)
         FrameInput in = SmokeInput(&game, &bot, frame);
         AdvanceSim(&game, &clock, &in, SMOKE_FRAME_DT);
         BeginDrawing();
-        GameDraw(&game);
+        GameDraw(&game, defaults.fov);
         if (SmokeWantsShot(&game, &bot, frame)) {
             rlDrawRenderBatchActive();
             SaveScreenshot(TextFormat("smoke_%d.png", ++bot.shots_taken));
