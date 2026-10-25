@@ -323,13 +323,25 @@ void GameDraw(const GameState *g, float fov_degrees)
     DrawHud(g, camera);
 }
 
+#define PAUSE_ROW_HEIGHT 44
+#define PAUSE_BAR_WIDTH 200
+
+Rectangle PauseRowBounds(int row)
+{
+    int width = GetScreenWidth(), height = GetScreenHeight();
+    return (Rectangle){(float)(width / 2 - 260), (float)(height / 3 + 130 + row * PAUSE_ROW_HEIGHT), 620.0f, (float)PAUSE_ROW_HEIGHT};
+}
+
+Rectangle PauseBarBounds(int row)
+{
+    Rectangle r = PauseRowBounds(row);
+    return (Rectangle){(float)(GetScreenWidth() / 2 - 20), r.y + 6.0f, (float)PAUSE_BAR_WIDTH, 16.0f};
+}
+
 void DrawPauseOverlay(const Settings *settings, int selected)
 {
-    const int row_height = 44;
     const int font_size = 28;
-    const int bar_width = 200;
     int width = GetScreenWidth(), height = GetScreenHeight();
-    int rows_y = height / 3 + 130;
     DrawRectangle(0, 0, width, height, (Color){0, 0, 0, 150});
     DrawTextCentered("PAUSED", width / 2, height / 3, 110, WHITE);
 
@@ -337,16 +349,17 @@ void DrawPauseOverlay(const Settings *settings, int selected)
         const SettingDef *def = SettingsDef((SettingId)i);
         float value = SettingsGet(settings, (SettingId)i);
         float ratio = Clamp((value - def->min) / (def->max - def->min), 0.0f, 1.0f);
-        int y = rows_y + i * row_height;
-        int bar_x = width / 2 - 20;
+        Rectangle row = PauseRowBounds(i);
+        Rectangle bar = PauseBarBounds(i);
         bool active = i == selected;
         Color color = active ? (Color){255, 230, 120, 255} : (Color){255, 255, 255, 190};
-        DrawTextShadow(def->name, width / 2 - 260, y, font_size, color);
-        DrawRectangle(bar_x, y + 6, bar_width, 16, (Color){0, 0, 0, 160});
-        DrawRectangle(bar_x, y + 6, (int)((float)bar_width * ratio), 16, color);
-        DrawTextShadow(TextFormat(active ? "< %.*f >" : "%.*f", def->decimals, (double)value), bar_x + bar_width + 20, y, font_size, color);
+        DrawTextShadow(def->name, (int)row.x, (int)row.y, font_size, color);
+        DrawRectangle((int)bar.x, (int)bar.y, (int)bar.width, (int)bar.height, (Color){0, 0, 0, 160});
+        DrawRectangle((int)bar.x, (int)bar.y, (int)(bar.width * ratio), (int)bar.height, color);
+        DrawTextShadow(TextFormat(active ? "< %.*f >" : "%.*f", def->decimals, (double)value), (int)(bar.x + bar.width) + 20, (int)row.y,
+                       font_size, color);
     }
 
-    DrawTextCentered("Up/Down select, Left/Right adjust, Esc resume, F11 fullscreen, Q quit", width / 2,
-                     rows_y + SETTING_COUNT * row_height + 30, 24, (Color){255, 230, 120, 255});
+    DrawTextCentered("Mouse or Up/Down/Left/Right to adjust, Esc resume, F11 fullscreen, Q quit", width / 2,
+                     (int)PauseRowBounds(SETTING_COUNT).y + 30, 24, (Color){255, 230, 120, 255});
 }

@@ -1,12 +1,12 @@
 # Pause and display mode
 
-Esc pauses the game: the simulation stops, the mouse is freed and a `PAUSED` overlay lists the volume, sensitivity and fov settings (Up/Down select, Left/Right adjust) above the hint `Up/Down select, Left/Right adjust, Esc resume, F11 fullscreen, Q quit`. Settings are saved to `settings.cfg` in the working directory when the game resumes or quits. Esc again resumes and Q while paused quits. F11 or Alt+Enter switches between fullscreen at the monitor's resolution and a 1280x720 window centred on the primary monitor. The `--fullscreen` and `--windowed` flags pick the start mode.
+Esc pauses the game: the simulation stops, the mouse is freed and a `PAUSED` overlay lists the volume, sensitivity and fov settings (Up/Down select, Left/Right adjust, or hover and click or drag a bar with the mouse) above the hint `Mouse or Up/Down/Left/Right to adjust, Esc resume, F11 fullscreen, Q quit`. Settings are saved to `settings.cfg` in the working directory when the game resumes or quits. Esc again resumes and Q while paused quits. F11 or Alt+Enter switches between fullscreen at the monitor's resolution and a 1280x720 window centred on the primary monitor. The `--fullscreen` and `--windowed` flags pick the start mode.
 
 ## Sub-features
 
 - `pause-toggle` shows and hides the `PAUSED` overlay with Esc.
 - `pause-freezes` stops the countdown, zombies and regeneration while paused.
-- `pause-settings` changes the selected setting with Left/Right, moves the selection with Up/Down, and writes `settings.cfg` on resume. A fresh launch reads it back.
+- `pause-settings` changes the selected setting with Left/Right or by clicking and dragging its bar, moves the selection with Up/Down, and writes `settings.cfg` on resume. A fresh launch reads it back.
 - `pause-quit` exits the game with Q while paused. Q while not paused swaps weapons instead.
 - `display-toggle` switches fullscreen and windowed with F11 and with Alt+Enter, also while paused.
 - `display-flags` starts fullscreen with `--fullscreen` and windowed with `--windowed` or no flag.

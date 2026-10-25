@@ -51,6 +51,13 @@ void SettingsAdjust(Settings *s, SettingId id, int direction)
     *field = Clamped(&DEFS[id], *field + step);
 }
 
+void SettingsSetRatio(Settings *s, SettingId id, float ratio)
+{
+    const SettingDef *def = &DEFS[id];
+    float raw = def->min + fminf(fmaxf(ratio, 0.0f), 1.0f) * (def->max - def->min);
+    *Field(s, id) = Clamped(def, def->min + roundf((raw - def->min) / def->step) * def->step);
+}
+
 static bool ParseLine(const char *line, size_t length, Settings *out)
 {
     const char *equals = memchr(line, '=', length);

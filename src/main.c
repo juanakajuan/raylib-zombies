@@ -125,14 +125,41 @@ static bool MenuKeyPressed(int key)
     return IsKeyPressed(key) || IsKeyPressedRepeat(key);
 }
 
-/* Returns true when a setting changed. */
-static bool UpdateSettingsMenu(Settings *settings, int *selected)
+typedef struct SettingsMenu {
+    int selected;
+    int dragging; /* row whose bar the held mouse button grabbed, or -1 */
+} SettingsMenu;
+
+/* Returns true when a setting changed. A drag keeps its row until the button is released. */
+static bool UpdateSettingsMenu(Settings *settings, SettingsMenu *menu)
 {
-    *selected = (*selected + SETTING_COUNT + MenuKeyPressed(KEY_DOWN) - MenuKeyPressed(KEY_UP)) % SETTING_COUNT;
+    Vector2 mouse = GetMousePosition();
+    bool changed = false;
+    menu->selected = (menu->selected + SETTING_COUNT + MenuKeyPressed(KEY_DOWN) - MenuKeyPressed(KEY_UP)) % SETTING_COUNT;
+    if (GetMouseDelta().x != 0.0f || GetMouseDelta().y != 0.0f) {
+        for (int i = 0; i < SETTING_COUNT; i++) {
+            if (CheckCollisionPointRec(mouse, PauseRowBounds(i))) menu->selected = i;
+        }
+    }
+    if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT)) menu->dragging = -1;
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        for (int i = 0; i < SETTING_COUNT; i++) {
+            if (CheckCollisionPointRec(mouse, PauseRowBounds(i))) menu->selected = i;
+            if (CheckCollisionPointRec(mouse, PauseBarBounds(i))) menu->dragging = i;
+        }
+    }
+    if (menu->dragging >= 0) {
+        Rectangle bar = PauseBarBounds(menu->dragging);
+        SettingsSetRatio(settings, (SettingId)menu->dragging, (mouse.x - bar.x) / bar.width);
+        menu->selected = menu->dragging;
+        changed = true;
+    }
     int direction = MenuKeyPressed(KEY_RIGHT) - MenuKeyPressed(KEY_LEFT);
-    if (direction == 0) return false;
-    SettingsAdjust(settings, (SettingId)*selected, direction);
-    return true;
+    if (direction != 0) {
+        SettingsAdjust(settings, (SettingId)menu->selected, direction);
+        changed = true;
+    }
+    return changed;
 }
 
 /* Pause lives here, not in GamePhase: a paused loop just stops stepping the sim. */
@@ -144,7 +171,7 @@ static int RunGame(void)
     bool quit = false;
     int discard_look_frames = LOOK_SETTLE_FRAMES;
     Settings settings;
-    int selected = 0;
+    SettingsMenu menu = {.selected = 0, .dragging = -1};
     bool settings_dirty = false;
     SettingsLoad(&settings);
     SetMasterVolume(settings.volume);
@@ -170,7 +197,7 @@ static int RunGame(void)
             }
         }
         quit = paused && IsKeyPressed(KEY_Q);
-        if (paused && UpdateSettingsMenu(&settings, &selected)) {
+        if (paused && UpdateSettingsMenu(&settings, &menu)) {
             settings_dirty = true;
             SetMasterVolume(settings.volume);
         }
@@ -184,7 +211,7 @@ static int RunGame(void)
         }
         BeginDrawing();
         GameDraw(&game, settings.fov);
-        if (paused) DrawPauseOverlay(&settings, selected);
+        if (paused) DrawPauseOverlay(&settings, menu.selected);
         EndDrawing();
     }
     if (settings_dirty) SettingsSave(&settings);

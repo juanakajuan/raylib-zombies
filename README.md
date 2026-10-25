@@ -32,7 +32,7 @@ On Linux it also needs the X11 and OpenGL development headers.
 | Q | Swap weapon |
 | Shift | Sprint |
 | Esc | Pause and free the mouse. Esc again resumes, Q quits while paused |
-| Up / Down, Left / Right | While paused: select a setting and change it |
+| Mouse, or Up / Down, Left / Right | While paused: hover or click a setting row and drag its bar, or select and change it with the arrows |
 | F11 or Alt+Enter | Switch between fullscreen and windowed |
 
 ## Settings

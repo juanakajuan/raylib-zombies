@@ -1032,6 +1032,21 @@ static void TestSettingsDefaultsAndAdjust(void)
     CHECK(other.volume == s.volume && other.sensitivity == s.sensitivity, "adjusting fov must leave the other settings alone");
 }
 
+static void TestSettingsSetRatio(void)
+{
+    Settings s = SettingsDefault();
+    SettingsSetRatio(&s, SETTING_FOV, 0.0f);
+    CHECK(s.fov == 60.0f, "ratio 0 sets min: %f", (double)s.fov);
+    SettingsSetRatio(&s, SETTING_FOV, 1.0f);
+    CHECK(s.fov == 110.0f, "ratio 1 sets max: %f", (double)s.fov);
+    SettingsSetRatio(&s, SETTING_FOV, 0.52f);
+    CHECK(s.fov == 85.0f, "ratio snaps to the 5 degree step: %f", (double)s.fov);
+    SettingsSetRatio(&s, SETTING_FOV, -3.0f);
+    CHECK(s.fov == 60.0f, "ratio below 0 clamps: %f", (double)s.fov);
+    SettingsSetRatio(&s, SETTING_VOLUME, 7.0f);
+    CHECK(s.volume == 1.0f && s.fov == 60.0f, "ratio above 1 clamps and leaves other settings alone");
+}
+
 static void TestSettingsParse(void)
 {
     Settings s;
@@ -1113,6 +1128,7 @@ int main(void)
     TestRoundEvents();
     TestPurchaseEvents();
     TestSettingsDefaultsAndAdjust();
+    TestSettingsSetRatio();
     TestSettingsParse();
     TestSettingsFormatRoundTrip();
 

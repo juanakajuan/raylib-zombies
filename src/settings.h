@@ -31,6 +31,8 @@ Settings SettingsDefault(void);
 const SettingDef *SettingsDef(SettingId id);
 float SettingsGet(const Settings *s, SettingId id);
 void SettingsAdjust(Settings *s, SettingId id, int direction);
+/* Places the value at ratio (0 = min, 1 = max) of its range, snapped to the step. */
+void SettingsSetRatio(Settings *s, SettingId id, float ratio);
 
 /* Always fills *out (defaults for missing or invalid keys). Returns true when at least one known key was read. */
 bool SettingsParse(const char *text, Settings *out);
