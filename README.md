@@ -61,6 +61,7 @@ Start with `--debug` to enable the F1 menu. It freezes the game and lists cheats
 ## Tests and smoke run
 
 ```sh
+cmake --build build -j
 ctest --test-dir build --output-on-failure
 ./build/zombies --smoke
 ```
