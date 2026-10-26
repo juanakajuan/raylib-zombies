@@ -17,7 +17,8 @@ cmake --build build -j
 ./build/zombies
 ```
 
-The first configure downloads raylib 5.5 through CMake `FetchContent`, so it needs network access.
+The first configure on a machine clones raylib 5.5 into `${XDG_CACHE_HOME:-~/.cache}/raylib-zombies/raylib-5.5`, so it needs network access.
+Later configures, in any worktree, use that copy. To use a different copy, set `-DFETCHCONTENT_SOURCE_DIR_RAYLIB=<path>`.
 On Linux it also needs the X11 and OpenGL development headers.
 
 ## Controls
@@ -66,6 +67,8 @@ ctest --test-dir build --output-on-failure
 
 `zombies_test` drives the simulation headlessly with scripted input.
 `--smoke` opens the real window, plays a scripted bot for about 10 seconds and writes `smoke_1.png`, `smoke_2.png` and `smoke_3.png` to the working directory.
+
+`./build/zombies_bench` measures the simulation cost. It prints the median microseconds per `GameUpdate` step at 240 Hz with 24 chasing zombies, over 7 runs. It is not part of `ctest`. Use a Release build for the measurement.
 
 ## Sound sources and licenses
 

@@ -289,11 +289,7 @@ def build(log_path: Path | None) -> None:
     """Configure if needed, then build. With a log path, output goes there and only a failure is reported."""
     steps: list[list[str]] = []
     if not (BUILD / "CMakeCache.txt").is_file():
-        configure = ["cmake", "-S", str(REPO), "-B", str(BUILD), "-DCMAKE_BUILD_TYPE=Release"]
-        source = os.environ.get("FETCHCONTENT_SOURCE_DIR_RAYLIB")
-        if source:
-            configure.append(f"-DFETCHCONTENT_SOURCE_DIR_RAYLIB={source}")
-        steps.append(configure)
+        steps.append(["cmake", "-S", str(REPO), "-B", str(BUILD), "-DCMAKE_BUILD_TYPE=Release"])
     steps.append(["cmake", "--build", str(BUILD), "-j"])
     for step in steps:
         if log_path is None:
