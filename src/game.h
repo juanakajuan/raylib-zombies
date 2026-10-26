@@ -12,10 +12,13 @@
 #define ZONE_COUNT 2
 
 #define START_POINTS 500
+#define HEADSHOT_MULTIPLIER 2.0f
 #define PLAYER_BASE_HEALTH 100.0f
 #define PERK_MAX_HEALTH 250.0f
 #define QUICK_HANDS_RELOAD_SCALE 0.5f
 #define PLAYER_EYE_HEIGHT 1.7f
+#define CROUCH_EYE_HEIGHT 1.0f
+#define PLAYER_HEAD_CLEARANCE 0.1f
 #define PLAYER_RADIUS 0.4f
 #define ZOMBIE_RADIUS 0.4f
 #define ZOMBIE_DAMAGE 40.0f
@@ -38,6 +41,8 @@ typedef struct FrameInput {
     int select_slot;  /* 1-based slot picked by a number key, 0 for none */
     int cycle_steps;  /* mouse wheel: positive selects the next weapon, negative the previous */
     bool sprint_held;
+    bool crouch_held;
+    bool jump_pressed;
     bool restart_pressed;
 } FrameInput;
 
@@ -89,7 +94,9 @@ typedef struct PerkDef {
 extern const PerkDef PERKS[PERK_COUNT];
 
 typedef struct Player {
-    Vector3 pos; /* feet position, y is always 0 */
+    Vector3 pos; /* feet position, y is the height above the floor */
+    float vertical_speed;
+    float eye_height; /* eases between PLAYER_EYE_HEIGHT and CROUCH_EYE_HEIGHT */
     float yaw; /* 0 looks down -Z, positive turns toward +X */
     float pitch;
     float health;
@@ -169,6 +176,8 @@ typedef struct InteractionInfo {
 
 extern const BoundingBox LEVEL_WALLS[];
 extern const int LEVEL_WALL_COUNT;
+extern const BoundingBox LEVEL_OVERHANGS[];
+extern const int LEVEL_OVERHANG_COUNT;
 extern const Zone LEVEL_ZONES[ZONE_COUNT];
 extern const Door LEVEL_DOORS[];
 extern const int LEVEL_DOOR_COUNT;
@@ -192,6 +201,18 @@ typedef enum GameEventKind {
     EVENT_PURCHASE_DENIED,
 } GameEventKind;
 
+#define MAX_DAMAGE_NUMBERS 32
+#define DAMAGE_NUMBER_TIME 0.8f
+
+typedef struct DamageNumber {
+    Vector3 pos;     /* world point where the first pellet hit */
+    float amount;    /* damage applied, headshot multiplier included */
+    float timer;     /* counts down from DAMAGE_NUMBER_TIME, 0 means the slot is free */
+    int zombie;      /* index into GameState.zombies */
+    bool headshot;
+    bool kill;
+} DamageNumber;
+
 typedef struct GameEvent {
     GameEventKind kind;
     int arg;
@@ -200,6 +221,7 @@ typedef struct GameEvent {
 typedef struct GameState {
     Player player;
     Zombie zombies[MAX_ZOMBIES];
+    DamageNumber damage_numbers[MAX_DAMAGE_NUMBERS];
     GamePhase phase;
     float phase_timer; /* seconds spent in the current phase */
     int round_number;

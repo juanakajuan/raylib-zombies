@@ -31,6 +31,8 @@ On Linux it also needs the X11 and OpenGL development headers.
 | E | Buy or interact |
 | 1, 2 or mouse wheel | Select weapon |
 | Shift | Sprint |
+| Space | Jump |
+| Ctrl / C | Crouch (hold) |
 | Esc | Pause and free the mouse. Esc again resumes, Q quits while paused |
 | Mouse, or Up / Down, Left / Right | While paused: hover or click a setting row and drag its bar, or select and change it with the arrows |
 | F11 or Alt+Enter | Switch between fullscreen and windowed |
@@ -43,9 +45,11 @@ The pause menu lists volume (0 to 1), mouse sensitivity (0.2x to 3x) and field o
 
 - Rounds with an intermission countdown. Zombie count, health and speed grow each round, with sprinters from round 4.
 - Hitscan shooting with headshots. Points: 10 per hit, 60 per kill, 100 per headshot kill.
+- A health bar above every living zombie, and floating damage numbers when you shoot one (yellow for headshots, orange for kills).
 - Three weapons from a data table: M1911 pistol, MP5K (1000 points, automatic) and shotgun (1500 points, multi-pellet). You carry two.
 - A 750 point door that opens the back room and its zombie spawns.
 - Two perks: Vitality Brew (2500 points) raises max health from 100 to 250. Quick Hands (3000 points, back room) halves reload time.
+- A low slab in the front room that you must crouch to pass under, so crouching changes your body and not only your view.
 - Health regenerates after 3 seconds without damage. Dying shows the game over screen, and R restarts.
 - Sound effects for each weapon, reload, hits and kills, zombie growls and attacks, player damage, round start and end, and purchases (with a buzz when you lack the points).
 

@@ -866,6 +866,190 @@ static void TestPlayerCannotWalkThroughZombies(void)
     CHECK(pinned.player.pos.z > 11.0f, "walking away stalled at z=%.2f", (double)pinned.player.pos.z);
 }
 
+static void TestJump(void)
+{
+    GameState g = NewActiveGame();
+    float ground_eye = PlayerEye(&g.player).y;
+    FrameInput jump = {.jump_pressed = true};
+    FrameInput idle = {0};
+    float peak = ground_eye;
+
+    GameUpdate(&g, &jump, DT);
+    for (int i = 0; i < 60; i++) {
+        GameUpdate(&g, i == 10 ? &jump : &idle, DT);
+        peak = fmaxf(peak, PlayerEye(&g.player).y);
+    }
+    CHECK(peak > ground_eye + 0.5f, "jump barely lifted the eye, peak=%.2f", (double)peak);
+    CHECK(peak < ground_eye + 1.0f, "jump went too high, peak=%.2f", (double)peak);
+    CHECK(PlayerEye(&g.player).y == ground_eye, "player did not land, eye=%.2f", (double)PlayerEye(&g.player).y);
+    CHECK(g.player.pos.y == 0.0f, "feet below or above the floor, y=%.2f", (double)g.player.pos.y);
+}
+
+static void TestNoDoubleJump(void)
+{
+    GameState g = NewActiveGame();
+    FrameInput jump = {.jump_pressed = true};
+    FrameInput idle = {0};
+    GameUpdate(&g, &jump, DT);
+    for (int i = 0; i < 25; i++) GameUpdate(&g, &idle, DT);
+    float before = g.player.pos.y;
+    GameUpdate(&g, &jump, DT);
+    CHECK(g.player.pos.y < before, "a mid-air jump press pushed the player up, before=%.2f after=%.2f", (double)before, (double)g.player.pos.y);
+
+    float peak = 0.0f;
+    for (int i = 0; i < 60; i++) {
+        GameUpdate(&g, &jump, DT);
+        peak = fmaxf(peak, g.player.pos.y);
+    }
+    CHECK(peak < 0.9f, "repeated presses stacked into a higher jump, peak=%.2f", (double)peak);
+}
+
+static void TestCrouch(void)
+{
+    GameState g = NewActiveGame();
+    FrameInput crouch = {.crouch_held = true};
+    FrameInput idle = {0};
+
+    GameUpdate(&g, &crouch, DT);
+    CHECK(PlayerEye(&g.player).y > CROUCH_EYE_HEIGHT + 0.3f, "crouch snapped instantly, eye=%.2f", (double)PlayerEye(&g.player).y);
+    for (int i = 0; i < 60; i++) GameUpdate(&g, &crouch, DT);
+    CHECK(fabsf(PlayerEye(&g.player).y - CROUCH_EYE_HEIGHT) < 0.001f, "eye=%.2f", (double)PlayerEye(&g.player).y);
+    for (int i = 0; i < 60; i++) GameUpdate(&g, &idle, DT);
+    CHECK(fabsf(PlayerEye(&g.player).y - PLAYER_EYE_HEIGHT) < 0.001f, "eye after release=%.2f", (double)PlayerEye(&g.player).y);
+
+    GameState walk = NewActiveGame();
+    GameState sneak = NewActiveGame();
+    FrameInput forward = {.move = {0.0f, 1.0f}};
+    FrameInput crouch_forward = {.move = {0.0f, 1.0f}, .crouch_held = true, .sprint_held = true};
+    for (int i = 0; i < 30; i++) {
+        GameUpdate(&walk, &forward, DT);
+        GameUpdate(&sneak, &crouch_forward, DT);
+    }
+    float walked = PlanarDistance(walk.player.pos, (Vector3){0.0f, 0.0f, 10.0f});
+    float crept = PlanarDistance(sneak.player.pos, (Vector3){0.0f, 0.0f, 10.0f});
+    CHECK(crept > 0.5f && crept < walked * 0.6f, "crouch walk=%.2f normal walk=%.2f", (double)crept, (double)walked);
+}
+
+static void TestCannotJumpWhileCrouched(void)
+{
+    GameState g = NewActiveGame();
+    FrameInput crouch_jump = {.crouch_held = true, .jump_pressed = true};
+    for (int i = 0; i < 10; i++) GameUpdate(&g, &crouch_jump, DT);
+    CHECK(g.player.pos.y == 0.0f, "crouched player jumped, y=%.2f", (double)g.player.pos.y);
+}
+
+#define SLAB_FRONT_X (-8.2f)
+
+static GameState NewGameBeforeSlab(void)
+{
+    GameState g = NewActiveGame();
+    g.player.pos = (Vector3){SLAB_FRONT_X, 0.0f, 10.0f};
+    return g;
+}
+
+static GameState NewGameUnderSlab(void)
+{
+    GameState g = NewGameBeforeSlab();
+    FrameInput crouch_forward = {.move = {0.0f, 1.0f}, .crouch_held = true};
+    while (g.player.pos.z > 3.8f) GameUpdate(&g, &crouch_forward, DT);
+    return g;
+}
+
+static void TestStandingPlayerCannotWalkUnderTheSlab(void)
+{
+    GameState g = NewGameBeforeSlab();
+    FrameInput forward = {.move = {0.0f, 1.0f}};
+    for (int i = 0; i < 60 * 5; i++) GameUpdate(&g, &forward, DT);
+    float edge = LEVEL_OVERHANGS[0].max.z + PLAYER_RADIUS;
+    CHECK(g.player.pos.z > edge - 0.01f, "standing player entered the slab, z=%.2f", (double)g.player.pos.z);
+    CHECK(g.player.pos.z < edge + 0.1f, "standing player stopped short of the slab, z=%.2f", (double)g.player.pos.z);
+}
+
+static void TestCrouchedPlayerWalksUnderTheSlab(void)
+{
+    GameState g = NewGameUnderSlab();
+    CHECK(g.player.pos.z < 4.0f && g.player.pos.z > LEVEL_OVERHANGS[0].min.z - PLAYER_RADIUS,
+          "crouched player did not get under the slab, z=%.2f", (double)g.player.pos.z);
+}
+
+static void TestReleasingCrouchUnderTheSlabKeepsThePlayerLow(void)
+{
+    GameState g = NewGameUnderSlab();
+    g.player.pos.z = 4.2f;
+    FrameInput forward = {.move = {0.0f, 1.0f}, .jump_pressed = true};
+    for (int i = 0; i < 12; i++) GameUpdate(&g, &forward, DT);
+    CHECK(fabsf(PlayerEye(&g.player).y - CROUCH_EYE_HEIGHT) < 0.001f, "eye rose under the slab, eye=%.2f", (double)PlayerEye(&g.player).y);
+    CHECK(g.player.pos.y == 0.0f, "player jumped under the slab, y=%.2f", (double)g.player.pos.y);
+    float crept = 4.2f - g.player.pos.z;
+    CHECK(fabsf(crept - 12.0f * DT * 2.2f) < 0.01f, "player did not move at crouch speed, moved %.2f", (double)crept);
+
+    FrameInput out = {.move = {0.0f, 1.0f}};
+    for (int i = 0; i < 120; i++) GameUpdate(&g, &out, DT);
+    CHECK(g.player.pos.z < LEVEL_OVERHANGS[0].min.z - PLAYER_RADIUS, "player stayed under the slab, z=%.2f", (double)g.player.pos.z);
+    CHECK(fabsf(PlayerEye(&g.player).y - PLAYER_EYE_HEIGHT) < 0.001f, "eye did not return, eye=%.2f", (double)PlayerEye(&g.player).y);
+}
+
+static float ShotAtZombieBehind(float x)
+{
+    GameState g = NewActiveGame();
+    g.player.pos = (Vector3){x, 0.0f, 6.0f};
+    Zombie *z = PlaceZombie(&g, (Vector3){x, 0.0f, 3.5f}, 150.0f);
+    AimAt(&g.player, (Vector3){x, 1.4f, 3.5f});
+    FrameInput fire = {.fire_pressed = true};
+    GameUpdate(&g, &fire, DT);
+    return z->health;
+}
+
+static void TestTheSlabStopsBullets(void)
+{
+    CHECK(ShotAtZombieBehind(-5.0f) < 150.0f, "control shot missed the zombie");
+    CHECK(ShotAtZombieBehind(SLAB_FRONT_X) == 150.0f, "a bullet passed through the slab");
+}
+
+static void TestZombiesReachPlayersAtTheSlab(void)
+{
+    const float spots[] = {5.4f, 3.8f};
+    for (size_t i = 0; i < sizeof spots / sizeof spots[0]; i++) {
+        GameState g = NewGameBeforeSlab();
+        g.player.pos.z = spots[i];
+        for (int s = 0; s < LEVEL_SPAWN_COUNT; s++) {
+            Vector3 stuck_at;
+            if (!g.zone_open[LEVEL_SPAWNS[s].zone]) continue;
+            CHECK(ZombieHurtsPlayer(&g, s, &stuck_at), "spawn %d never reached the player at z=%.1f, stuck at %.2f,%.2f", s,
+                  (double)spots[i], (double)stuck_at.x, (double)stuck_at.z);
+        }
+    }
+}
+
+static void TestJumpDoesNotDodgeZombieAttacks(void)
+{
+    GameState g = NewActiveGame();
+    PlaceZombie(&g, (Vector3){0.0f, 0.0f, 9.0f}, 150.0f)->attack_timer = 0.0f;
+    FrameInput jump = {.jump_pressed = true};
+    FrameInput idle = {0};
+    GameUpdate(&g, &jump, DT);
+    for (int i = 0; i < 40; i++) GameUpdate(&g, &idle, DT);
+    CHECK(g.player.health < PLAYER_BASE_HEALTH, "a jump dodged the attack, health=%.1f", (double)g.player.health);
+}
+
+static void TestZombiesStayOnTheFloorWhilePlayerJumps(void)
+{
+    GameState g = NewActiveGame();
+    Invulnerable(&g);
+    PlaceZombie(&g, (Vector3){0.0f, 0.0f, 4.0f}, 150.0f);
+    FrameInput jump = {.jump_pressed = true};
+    float closest = INFINITY;
+    for (int i = 0; i < 60 * 8; i++) {
+        GameUpdate(&g, &jump, DT);
+        for (int j = 0; j < MAX_ZOMBIES; j++) {
+            if (g.zombies[j].state == ZOMBIE_FREE) continue;
+            CHECK(g.zombies[j].pos.y == 0.0f, "zombie left the floor, y=%.3f", (double)g.zombies[j].pos.y);
+            closest = fminf(closest, PlanarDistance(g.zombies[j].pos, g.player.pos));
+        }
+    }
+    CHECK(closest < 1.3f, "zombie never reached the jumping player, closest=%.2f", (double)closest);
+}
+
 static void TestZombiesNeverStackOnThePlayer(void)
 {
     GameState g = NewActiveGame();
@@ -1038,6 +1222,84 @@ static void TestHitAndKillEvents(void)
     miss.player.yaw = 3.14159265f;
     Press(&miss, fire);
     CHECK(CountEvents(&miss, EVENT_HIT) == 0, "a miss must not play a hit");
+}
+
+static int CountDamageNumbers(const GameState *g)
+{
+    int count = 0;
+    for (int i = 0; i < MAX_DAMAGE_NUMBERS; i++) count += g->damage_numbers[i].timer > 0.0f;
+    return count;
+}
+
+static const DamageNumber *FirstDamageNumber(const GameState *g)
+{
+    for (int i = 0; i < MAX_DAMAGE_NUMBERS; i++) {
+        if (g->damage_numbers[i].timer > 0.0f) return &g->damage_numbers[i];
+    }
+    return NULL;
+}
+
+static void TestDamageNumbers(void)
+{
+    FrameInput fire = {.fire_pressed = true};
+    FrameInput idle = {0};
+    const float damage = WEAPONS[WEAPON_PISTOL].damage;
+
+    GameState body = NewActiveGame();
+    Zombie *z = PlaceZombie(&body, (Vector3){0.0f, 0.0f, 4.0f}, 500.0f);
+    AimAt(&body.player, (Vector3){z->pos.x, 0.7f, z->pos.z});
+    Press(&body, fire);
+    const DamageNumber *n = FirstDamageNumber(&body);
+    CHECK(CountDamageNumbers(&body) == 1 && n != NULL, "a body hit must create one number, got %d", CountDamageNumbers(&body));
+    CHECK(n != NULL && n->amount == damage && !n->headshot && !n->kill && n->zombie == (int)(z - body.zombies),
+          "body number amount=%.1f headshot=%d kill=%d", n ? (double)n->amount : -1.0, n ? n->headshot : -1, n ? n->kill : -1);
+    CHECK(n != NULL && fabsf(n->pos.x) < 0.01f && fabsf(n->pos.z - z->pos.z) < 0.5f && fabsf(n->pos.y - 0.7f) < 0.2f,
+          "the number must start at the hit point, pos=%.2f,%.2f,%.2f", n ? (double)n->pos.x : 0.0, n ? (double)n->pos.y : 0.0, n ? (double)n->pos.z : 0.0);
+
+    GameState head = NewActiveGame();
+    z = PlaceZombie(&head, (Vector3){0.0f, 0.0f, 4.0f}, 500.0f);
+    AimAt(&head.player, (Vector3){z->pos.x, 1.65f, z->pos.z});
+    Press(&head, fire);
+    n = FirstDamageNumber(&head);
+    CHECK(n != NULL && n->headshot && n->amount == damage * HEADSHOT_MULTIPLIER, "headshot number amount=%.1f", n ? (double)n->amount : -1.0);
+
+    GameState killed = NewActiveGame();
+    z = PlaceZombie(&killed, (Vector3){0.0f, 0.0f, 4.0f}, 10.0f);
+    AimAt(&killed.player, (Vector3){z->pos.x, 0.7f, z->pos.z});
+    Press(&killed, fire);
+    n = FirstDamageNumber(&killed);
+    CHECK(n != NULL && n->kill, "the killing blow must mark its number");
+
+    GameState blast = NewActiveGame();
+    blast.player.slots[0] = (WeaponSlot){WEAPON_SHOTGUN, WEAPONS[WEAPON_SHOTGUN].mag_size, WEAPONS[WEAPON_SHOTGUN].reserve_max};
+    z = PlaceZombie(&blast, (Vector3){0.0f, 0.0f, 1.2f}, 9000.0f);
+    AimAt(&blast.player, (Vector3){z->pos.x, 0.7f, z->pos.z});
+    Press(&blast, fire);
+    n = FirstDamageNumber(&blast);
+    CHECK(CountDamageNumbers(&blast) == 1 && n != NULL, "pellets on one zombie must merge, got %d numbers", CountDamageNumbers(&blast));
+    CHECK(n != NULL && fabsf(n->amount - (9000.0f - z->health)) < 0.01f && n->amount > damage, "merged amount=%.1f health lost=%.1f",
+          n ? (double)n->amount : -1.0, (double)(9000.0f - z->health));
+
+    for (float t = 0.0f; t < DAMAGE_NUMBER_TIME + 0.05f; t += DT) GameUpdate(&body, &idle, DT);
+    CHECK(CountDamageNumbers(&body) == 0, "numbers must free their slot after DAMAGE_NUMBER_TIME");
+
+    GameState full = NewActiveGame();
+    for (int i = 0; i < MAX_DAMAGE_NUMBERS; i++) {
+        full.damage_numbers[i] = (DamageNumber){.amount = 1.0f, .timer = 0.1f + 0.01f * (float)i, .zombie = MAX_ZOMBIES - 1};
+    }
+    z = PlaceZombie(&full, (Vector3){0.0f, 0.0f, 4.0f}, 500.0f);
+    AimAt(&full.player, (Vector3){z->pos.x, 0.7f, z->pos.z});
+    Press(&full, fire);
+    CHECK(CountDamageNumbers(&full) == MAX_DAMAGE_NUMBERS && full.damage_numbers[0].amount == damage && full.damage_numbers[1].amount == 1.0f,
+          "a full pool must recycle the oldest number");
+
+    GameState over = NewActiveGame();
+    z = PlaceZombie(&over, (Vector3){0.0f, 0.0f, 4.0f}, 500.0f);
+    AimAt(&over.player, (Vector3){z->pos.x, 0.7f, z->pos.z});
+    Press(&over, fire);
+    over.phase = PHASE_GAME_OVER;
+    for (float t = 0.0f; t < DAMAGE_NUMBER_TIME + 0.05f; t += DT) GameUpdate(&over, &idle, DT);
+    CHECK(CountDamageNumbers(&over) == 0, "numbers must finish during game over");
 }
 
 static void TestZombieAndPlayerDamageEvents(void)
@@ -1234,11 +1496,23 @@ int main(void)
     TestGameOverLetsDyingZombiesFinishFalling();
     TestPlayerCannotWalkThroughZombies();
     TestZombiesNeverStackOnThePlayer();
+    TestJump();
+    TestNoDoubleJump();
+    TestCrouch();
+    TestCannotJumpWhileCrouched();
+    TestStandingPlayerCannotWalkUnderTheSlab();
+    TestCrouchedPlayerWalksUnderTheSlab();
+    TestReleasingCrouchUnderTheSlabKeepsThePlayerLow();
+    TestTheSlabStopsBullets();
+    TestZombiesReachPlayersAtTheSlab();
+    TestJumpDoesNotDodgeZombieAttacks();
+    TestZombiesStayOnTheFloorWhilePlayerJumps();
     TestInteractablesAreVisibleInPlainView();
     TestPartitionHidesTheFrontRoomFromTheBackRoom();
     TestDoorwayControlsTheViewIntoTheFrontRoom();
     TestFireAndReloadEvents();
     TestHitAndKillEvents();
+    TestDamageNumbers();
     TestZombieAndPlayerDamageEvents();
     TestRoundEvents();
     TestPurchaseEvents();
