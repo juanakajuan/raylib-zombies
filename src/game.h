@@ -17,6 +17,7 @@
 #define QUICK_HANDS_RELOAD_SCALE 0.5f
 #define PLAYER_EYE_HEIGHT 1.7f
 #define CROUCH_EYE_HEIGHT 1.0f
+#define PLAYER_HEAD_CLEARANCE 0.1f
 #define PLAYER_RADIUS 0.4f
 #define ZOMBIE_RADIUS 0.4f
 #define ZOMBIE_DAMAGE 40.0f
@@ -173,6 +174,8 @@ typedef struct InteractionInfo {
 
 extern const BoundingBox LEVEL_WALLS[];
 extern const int LEVEL_WALL_COUNT;
+extern const BoundingBox LEVEL_OVERHANGS[];
+extern const int LEVEL_OVERHANG_COUNT;
 extern const Zone LEVEL_ZONES[ZONE_COUNT];
 extern const Door LEVEL_DOORS[];
 extern const int LEVEL_DOOR_COUNT;

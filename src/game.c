@@ -71,6 +71,12 @@ const BoundingBox LEVEL_WALLS[] = {
 };
 const int LEVEL_WALL_COUNT = (int)(sizeof LEVEL_WALLS / sizeof LEVEL_WALLS[0]);
 
+/* Not in LEVEL_WALLS: they block only a body tall enough to touch them, and zombies stoop under them. */
+const BoundingBox LEVEL_OVERHANGS[] = {
+    {{-10.0f, 1.3f, 2.8f}, {-6.5f, 1.6f, 4.8f}},
+};
+const int LEVEL_OVERHANG_COUNT = (int)(sizeof LEVEL_OVERHANGS / sizeof LEVEL_OVERHANGS[0]);
+
 const Zone LEVEL_ZONES[ZONE_COUNT] = {
     {-10.0f, 10.0f, 0.0f, 14.0f, {0.0f, 0.0f}},
     {-10.0f, 10.0f, -16.0f, 0.0f, {0.0f, 0.0f}},
@@ -220,11 +226,25 @@ static bool StepsIntoBody(Vector3 from, Vector3 to, Vector3 other)
     return after < PLAYER_RADIUS + ZOMBIE_RADIUS && after < before;
 }
 
+static bool PlayerBodyBlocked(Vector3 pos, float eye_height)
+{
+    float top = pos.y + eye_height + PLAYER_HEAD_CLEARANCE;
+    for (int i = 0; i < LEVEL_OVERHANG_COUNT; i++) {
+        const BoundingBox *b = &LEVEL_OVERHANGS[i];
+        if (pos.x + PLAYER_RADIUS > b->min.x && pos.x - PLAYER_RADIUS < b->max.x &&
+            pos.z + PLAYER_RADIUS > b->min.z && pos.z - PLAYER_RADIUS < b->max.z &&
+            top > b->min.y && pos.y < b->max.y) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /* mover is PLAYER_MOVER or the index of the zombie that moves. */
 static bool MoveBlocked(const GameState *g, Vector3 from, Vector3 to, int mover)
 {
     if (mover != PLAYER_MOVER) return GameBlocked(g, to, ZOMBIE_RADIUS) || StepsIntoBody(from, to, PlayerFloorPoint(g));
-    if (GameBlocked(g, to, PLAYER_RADIUS)) return true;
+    if (GameBlocked(g, to, PLAYER_RADIUS) || PlayerBodyBlocked(to, g->player.eye_height)) return true;
     for (int i = 0; i < MAX_ZOMBIES; i++) {
         if (ZombieTargetable(&g->zombies[i]) && StepsIntoBody(from, to, g->zombies[i].pos)) return true;
     }
@@ -257,6 +277,10 @@ static float NearestSolidDistance(const GameState *g, Ray ray)
         const BoundingBox *b = SolidSlot(g, i);
         if (b == NULL) continue;
         RayCollision hit = GetRayCollisionBox(ray, *b);
+        if (hit.hit && hit.distance < nearest) nearest = hit.distance;
+    }
+    for (int i = 0; i < LEVEL_OVERHANG_COUNT; i++) {
+        RayCollision hit = GetRayCollisionBox(ray, LEVEL_OVERHANGS[i]);
         if (hit.hit && hit.distance < nearest) nearest = hit.distance;
     }
     return nearest;
@@ -413,19 +437,20 @@ static void UpdateMovement(GameState *g, const FrameInput *in, float dt)
 
     Vector3 forward = {sinf(p->yaw), 0.0f, -cosf(p->yaw)};
     Vector3 right = {cosf(p->yaw), 0.0f, sinf(p->yaw)};
+    bool crouching = in->crouch_held || PlayerBodyBlocked(p->pos, PLAYER_EYE_HEIGHT);
     bool grounded = p->pos.y <= 0.0f && p->vertical_speed <= 0.0f;
-    if (in->jump_pressed && grounded && !in->crouch_held) p->vertical_speed = JUMP_SPEED;
+    if (in->jump_pressed && grounded && !crouching) p->vertical_speed = JUMP_SPEED;
     p->vertical_speed -= GRAVITY * dt;
     float rise = p->pos.y + p->vertical_speed * dt;
     p->pos.y = fmaxf(rise, 0.0f);
     if (rise <= 0.0f) p->vertical_speed = 0.0f;
 
-    float eye_target = in->crouch_held ? CROUCH_EYE_HEIGHT : PLAYER_EYE_HEIGHT;
+    float eye_target = crouching ? CROUCH_EYE_HEIGHT : PLAYER_EYE_HEIGHT;
     float eye_step = CROUCH_EASE_RATE * dt;
     p->eye_height += Clamp(eye_target - p->eye_height, -eye_step, eye_step);
 
     float speed = in->sprint_held && in->move.y > 0.0f ? SPRINT_SPEED : WALK_SPEED;
-    if (in->crouch_held) speed = CROUCH_SPEED;
+    if (crouching) speed = CROUCH_SPEED;
     Vector3 wish = Vector3Add(Vector3Scale(forward, in->move.y), Vector3Scale(right, in->move.x));
     p->pos = SlideMove(g, p->pos, Vector3Scale(wish, speed * dt), PLAYER_MOVER);
     g->player_zone = ZoneAt(p->pos, g->player_zone);

@@ -48,6 +48,7 @@ The pause menu lists volume (0 to 1), mouse sensitivity (0.2x to 3x) and field o
 - Three weapons from a data table: M1911 pistol, MP5K (1000 points, automatic) and shotgun (1500 points, multi-pellet). You carry two.
 - A 750 point door that opens the back room and its zombie spawns.
 - Two perks: Vitality Brew (2500 points) raises max health from 100 to 250. Quick Hands (3000 points, back room) halves reload time.
+- A low slab in the front room that you must crouch to pass under, so crouching changes your body and not only your view.
 - Health regenerates after 3 seconds without damage. Dying shows the game over screen, and R restarts.
 - Sound effects for each weapon, reload, hits and kills, zombie growls and attacks, player damage, round start and end, and purchases (with a buzz when you lack the points).
 

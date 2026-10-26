@@ -908,6 +908,89 @@ static void TestCannotJumpWhileCrouched(void)
     CHECK(g.player.pos.y == 0.0f, "crouched player jumped, y=%.2f", (double)g.player.pos.y);
 }
 
+#define SLAB_FRONT_X (-8.2f)
+
+static GameState NewGameBeforeSlab(void)
+{
+    GameState g = NewActiveGame();
+    g.player.pos = (Vector3){SLAB_FRONT_X, 0.0f, 10.0f};
+    return g;
+}
+
+static GameState NewGameUnderSlab(void)
+{
+    GameState g = NewGameBeforeSlab();
+    FrameInput crouch_forward = {.move = {0.0f, 1.0f}, .crouch_held = true};
+    while (g.player.pos.z > 3.8f) GameUpdate(&g, &crouch_forward, DT);
+    return g;
+}
+
+static void TestStandingPlayerCannotWalkUnderTheSlab(void)
+{
+    GameState g = NewGameBeforeSlab();
+    FrameInput forward = {.move = {0.0f, 1.0f}};
+    for (int i = 0; i < 60 * 5; i++) GameUpdate(&g, &forward, DT);
+    float edge = LEVEL_OVERHANGS[0].max.z + PLAYER_RADIUS;
+    CHECK(g.player.pos.z > edge - 0.01f, "standing player entered the slab, z=%.2f", (double)g.player.pos.z);
+    CHECK(g.player.pos.z < edge + 0.1f, "standing player stopped short of the slab, z=%.2f", (double)g.player.pos.z);
+}
+
+static void TestCrouchedPlayerWalksUnderTheSlab(void)
+{
+    GameState g = NewGameUnderSlab();
+    CHECK(g.player.pos.z < 4.0f && g.player.pos.z > LEVEL_OVERHANGS[0].min.z - PLAYER_RADIUS,
+          "crouched player did not get under the slab, z=%.2f", (double)g.player.pos.z);
+}
+
+static void TestReleasingCrouchUnderTheSlabKeepsThePlayerLow(void)
+{
+    GameState g = NewGameUnderSlab();
+    g.player.pos.z = 4.2f;
+    FrameInput forward = {.move = {0.0f, 1.0f}, .jump_pressed = true};
+    for (int i = 0; i < 12; i++) GameUpdate(&g, &forward, DT);
+    CHECK(fabsf(PlayerEye(&g.player).y - CROUCH_EYE_HEIGHT) < 0.001f, "eye rose under the slab, eye=%.2f", (double)PlayerEye(&g.player).y);
+    CHECK(g.player.pos.y == 0.0f, "player jumped under the slab, y=%.2f", (double)g.player.pos.y);
+    float crept = 4.2f - g.player.pos.z;
+    CHECK(fabsf(crept - 12.0f * DT * 2.2f) < 0.01f, "player did not move at crouch speed, moved %.2f", (double)crept);
+
+    FrameInput out = {.move = {0.0f, 1.0f}};
+    for (int i = 0; i < 120; i++) GameUpdate(&g, &out, DT);
+    CHECK(g.player.pos.z < LEVEL_OVERHANGS[0].min.z - PLAYER_RADIUS, "player stayed under the slab, z=%.2f", (double)g.player.pos.z);
+    CHECK(fabsf(PlayerEye(&g.player).y - PLAYER_EYE_HEIGHT) < 0.001f, "eye did not return, eye=%.2f", (double)PlayerEye(&g.player).y);
+}
+
+static float ShotAtZombieBehind(float x)
+{
+    GameState g = NewActiveGame();
+    g.player.pos = (Vector3){x, 0.0f, 6.0f};
+    Zombie *z = PlaceZombie(&g, (Vector3){x, 0.0f, 3.5f}, 150.0f);
+    AimAt(&g.player, (Vector3){x, 1.4f, 3.5f});
+    FrameInput fire = {.fire_pressed = true};
+    GameUpdate(&g, &fire, DT);
+    return z->health;
+}
+
+static void TestTheSlabStopsBullets(void)
+{
+    CHECK(ShotAtZombieBehind(-5.0f) < 150.0f, "control shot missed the zombie");
+    CHECK(ShotAtZombieBehind(SLAB_FRONT_X) == 150.0f, "a bullet passed through the slab");
+}
+
+static void TestZombiesReachPlayersAtTheSlab(void)
+{
+    const float spots[] = {5.4f, 3.8f};
+    for (size_t i = 0; i < sizeof spots / sizeof spots[0]; i++) {
+        GameState g = NewGameBeforeSlab();
+        g.player.pos.z = spots[i];
+        for (int s = 0; s < LEVEL_SPAWN_COUNT; s++) {
+            Vector3 stuck_at;
+            if (!g.zone_open[LEVEL_SPAWNS[s].zone]) continue;
+            CHECK(ZombieHurtsPlayer(&g, s, &stuck_at), "spawn %d never reached the player at z=%.1f, stuck at %.2f,%.2f", s,
+                  (double)spots[i], (double)stuck_at.x, (double)stuck_at.z);
+        }
+    }
+}
+
 static void TestJumpDoesNotDodgeZombieAttacks(void)
 {
     GameState g = NewActiveGame();
@@ -1308,6 +1391,11 @@ int main(void)
     TestNoDoubleJump();
     TestCrouch();
     TestCannotJumpWhileCrouched();
+    TestStandingPlayerCannotWalkUnderTheSlab();
+    TestCrouchedPlayerWalksUnderTheSlab();
+    TestReleasingCrouchUnderTheSlabKeepsThePlayerLow();
+    TestTheSlabStopsBullets();
+    TestZombiesReachPlayersAtTheSlab();
     TestJumpDoesNotDodgeZombieAttacks();
     TestZombiesStayOnTheFloorWhilePlayerJumps();
     TestInteractablesAreVisibleInPlainView();
