@@ -98,6 +98,8 @@ static int windowed_layout_frames;
 
 static void ApplyWindowedLayout(void)
 {
+    /* The window manager ignores a resize of a maximized window, so it stays maximized. */
+    if (IsWindowMaximized()) return;
     Vector2 monitor = GetMonitorPosition(0);
     SetWindowSize(WINDOW_WIDTH, WINDOW_HEIGHT);
     SetWindowPosition((int)monitor.x + (GetMonitorWidth(0) - WINDOW_WIDTH) / 2,
