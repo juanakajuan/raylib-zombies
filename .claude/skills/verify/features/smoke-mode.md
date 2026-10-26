@@ -27,4 +27,4 @@ Preconditions:
 - Smoke mode gives itself 3000 points and skips most of the countdown. Never use it as proof of a purchase or round feature. Use the matching feature recipe.
 - Smoke mode does not read `settings.cfg`, so the `volume=0` file from zv has no effect on it. Silence comes from `--mute` and `ZOMBIES_MUTE=1`, which `zv launch` always gives. If the log does not have the muted line, stop the run.
 - The game cannot report its exit code through gamescope. Use the `smoke:` line and the PNG count instead.
-- `./run.sh --smoke` without zv opens a real window on the user's desktop, takes focus for a few seconds, and plays audio. The guard hook blocks it for agents.
+- `./run.sh --smoke` without zv opens a real window on the user's desktop, takes focus for a few seconds, and plays audio. The guard hook blocks an agent command that starts the game or `run.sh` without `--mute`. It reads shell words, so it does not find a launch that is hidden in a script or another language.

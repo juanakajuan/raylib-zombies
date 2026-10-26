@@ -7,11 +7,14 @@ desynced KWin's input path. A game run without --mute played on the user's speak
 Use the verify skill (`zv launch`), which mutes the game and runs a private headless
 gamescope on its own bus.
 
+The launch check reads shell words, not a full shell grammar. It finds the game when it
+is the command of a simple command, also behind common wrappers and inside `bash -c`.
 Run with --selftest to check the rules.
 """
 
 import json
 import re
+import shlex
 import sys
 
 ZV = "Use `zv launch` (.claude/skills/verify/bin/zv), which mutes the game and runs a private headless gamescope"
@@ -22,20 +25,79 @@ RULES: list[tuple[str, str]] = [
     (r"\bDISPLAY=:0\b", "this targets the user's own desktop display"),
 ]
 
-# The game binary or run.sh at the start of a shell command, after any VAR=value and wrapper words.
-GAME_LAUNCH = re.compile(
-    r"(?:^|[;&|(`\n]|\$\()\s*"
-    r"(?:\w+=\S*\s+|(?:env|exec|nohup|setsid|command|sh|bash|timeout\s+\S+)\s+)*"
-    r"(?:\S*/zombies|(?:\S*/)?run\.sh)(?=\s|$|[;&|)`])"
-)
-MUTED = re.compile(r"(?:^|\s)--mute(?=\s|$|[;&|)`])|\bZOMBIES_MUTE=1\b")
+WRAPPERS = {"env", "exec", "nohup", "setsid", "command", "nice", "ionice", "stdbuf", "timeout", "time", "sudo",
+            "xvfb-run", "dbus-run-session", "gamescope", "strace", "ltrace", "valgrind", "gdb", "xargs", "watch",
+            "bash", "sh", "then", "do", "else", "if", "while", "until", "!", "{"}
+WRAPPER_ARG = re.compile(r"-.*|\d+(\.\d+)?[smhd]?|[A-Z][A-Z0-9_]*|\w+=.*")
+ASSIGNMENT = re.compile(r"\w+=.*")
+GAME = re.compile(r"\S*/zombies|(\S*/)?run\.sh")
+MUTE_VAR = re.compile(r"ZOMBIES_MUTE=(?!0?$).*")
+SEPARATOR = re.compile(r"[;&|()\n]+")
+
+
+def words_of(command: str) -> list[str]:
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|()<>\n")
+    lexer.whitespace = " \t\r"
+    lexer.whitespace_split = True
+    try:
+        return list(lexer)
+    except ValueError:
+        return command.split()
+
+
+def simple_commands(command: str) -> list[list[str]]:
+    """Split into simple commands. Heredoc bodies are data, so they are dropped."""
+    segments: list[list[str]] = [[]]
+    delimiters: list[str] = []
+    in_body = False
+    body_line: list[str] = []
+    words = words_of(command)
+    for i, word in enumerate(words):
+        if in_body:
+            if "\n" not in word:
+                body_line.append(word)
+                continue
+            if body_line == [delimiters[0]]:
+                delimiters.pop(0)
+                in_body = bool(delimiters)
+            body_line = []
+            continue
+        if word in ("<<", "<<-") and i + 1 < len(words):
+            delimiters.append(words[i + 1])
+        if SEPARATOR.fullmatch(word):
+            in_body = "\n" in word and bool(delimiters)
+            segments.append([])
+        else:
+            segments[-1].append(word)
+    return [segment for segment in segments if segment]
+
+
+def unmuted_launch(command: str) -> bool:
+    segments = simple_commands(command)
+    exported = any(MUTE_VAR.fullmatch(word) for segment in segments if segment[:1] == ["export"] for word in segment)
+    for segment in segments:
+        i = 0
+        while i < len(segment) and ASSIGNMENT.fullmatch(segment[i]):
+            i += 1
+        while i < len(segment) and segment[i] in WRAPPERS:
+            shell = segment[i] in ("bash", "sh")
+            i += 1
+            while i < len(segment) and WRAPPER_ARG.fullmatch(segment[i]):
+                if shell and segment[i].startswith("-") and segment[i].endswith("c") and i + 1 < len(segment):
+                    if unmuted_launch(segment[i + 1]):
+                        return True
+                i += 1
+        if i < len(segment) and GAME.fullmatch(segment[i].strip("`")):
+            if not (exported or "--mute" in segment or any(MUTE_VAR.fullmatch(word) for word in segment)):
+                return True
+    return False
 
 
 def block_reason(command: str) -> str | None:
     for pattern, reason in RULES:
         if re.search(pattern, command):
             return f"{reason}. Use .claude/skills/verify/bin/zv (private headless gamescope) instead."
-    if GAME_LAUNCH.search(command) and not MUTED.search(command):
+    if unmuted_launch(command):
         return f"this runs build/zombies without --mute or ZOMBIES_MUTE=1, so it can play audio on the user's speakers. {ZV}."
     return None
 
@@ -48,18 +110,48 @@ SELFTEST: list[tuple[str, bool]] = [
     ("cd build && ./zombies --windowed", True),
     ("cmake --build build && ./build/zombies", True),
     ("FOO=1 /home/u/raylib-zombies/build/zombies", True),
+    ('"./build/zombies" --smoke', True),
+    ("'./run.sh'", True),
+    ('"$PWD"/build/zombies --smoke', True),
+    ("(./build/zombies --smoke)", True),
+    ("env -i ./build/zombies --smoke", True),
+    ("bash -c './build/zombies --smoke'", True),
+    ("bash -lc ./run.sh", True),
+    ("nice ./build/zombies --smoke", True),
+    ("timeout -s KILL 5 ./build/zombies", True),
+    ("timeout --signal=INT 5 ./build/zombies", True),
+    ("strace -f ./build/zombies", True),
+    ("gdb --args ./build/zombies", True),
+    ("sh -c ./build/zombies", True),
+    ("./build/zombies>log", True),
+    ("gamescope -- ./build/zombies", True),
+    ("{ ./build/zombies; }", True),
+    ("if true; then ./build/zombies; fi", True),
+    ("while :; do ./build/zombies; done", True),
+    ("./build/zombies --smoke; echo --mute", True),
+    ("./build/zombies --windowed # --mute", True),
+    ("ZOMBIES_MUTE=1 true; ./build/zombies", True),
+    ("ZOMBIES_MUTE=0 ./build/zombies", True),
+    ("cat <<'X'\nnotes\nX\n./build/zombies", True),
     ("kwin_wayland --virtual", True),
     ("DISPLAY=:0 xdotool key a", True),
     ("zv launch --run smoke-1 -- --smoke", False),
     (".claude/skills/verify/bin/zv launch --run a --output 1920x1080", False),
     ("./build/zombies --mute --smoke", False),
     ("ZOMBIES_MUTE=1 ./build/zombies --smoke", False),
+    ("ZOMBIES_MUTE=yes ./build/zombies --smoke", False),
+    ("export ZOMBIES_MUTE=1; ./build/zombies --smoke", False),
+    ("bash -c './build/zombies --mute'", False),
     ("ctest --test-dir build --output-on-failure", False),
     ("./build/zombies_test", False),
     ("cmake --build build -j", False),
     ("cat run.sh", False),
     ("ls -l build/zombies", False),
     ("git diff -- run.sh src/main.c", False),
+    ("rg '(./run.sh)' .", False),
+    ("git commit -m 'guard: block; ./run.sh without mute'", False),
+    ("cat > notes.md <<'X'\n./build/zombies --smoke\n./run.sh\nX", False),
+    ("gh pr create --body-file - <<EOF\nNever run ./build/zombies directly.\nEOF\necho done", False),
 ]
 
 
@@ -69,9 +161,7 @@ def selftest() -> int:
         reason = block_reason(command)
         ok = (reason is not None) == blocked and (reason is None or "zv" in reason)
         failures += not ok
-        print(f"{'ok  ' if ok else 'FAIL'} {'block' if reason else 'allow'}  {command}")
-        if reason:
-            print(f"       {reason}")
+        print(f"{'ok  ' if ok else 'FAIL'} {'block' if reason else 'allow'}  {command!r}")
     print(f"{len(SELFTEST) - failures} of {len(SELFTEST)} cases passed")
     return 1 if failures else 0
 
