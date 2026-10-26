@@ -4,6 +4,7 @@ import sys
 import wave
 from pathlib import Path
 
+sys.dont_write_bytecode = True  # Python reuses a cached table when an edit keeps the file size and the mtime second.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from sound_levels import CLIPS
 
