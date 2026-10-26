@@ -24,7 +24,6 @@
 #define ATTACK_WINDUP 0.4f
 #define ATTACK_COOLDOWN 1.0f
 #define REGEN_RATE 50.0f
-#define PERK_NAME "Vitality Brew"
 /* Below the 0.6m partition plus both 0.4m body radii, so a zombie cannot hit through the wall. */
 #define ATTACK_RANGE 1.3f
 #define DOOR_BOX {{-1.5f, 0.0f, -0.3f}, {1.5f, WALL_HEIGHT, 0.3f}}
@@ -51,6 +50,11 @@ const WeaponDef WEAPONS[WEAPON_COUNT] = {
         .mag_size = 6, .reserve_max = 54, .reload_time = 2.4f,
         .pellets = 6, .spread = 0.055f, .wall_cost = 1500,
     },
+};
+
+const PerkDef PERKS[PERK_COUNT] = {
+    [PERK_VITALITY] = {"Vitality Brew", 2500},
+    [PERK_QUICK_HANDS] = {"Quick Hands", 3000},
 };
 
 const BoundingBox LEVEL_WALLS[] = {
@@ -90,7 +94,7 @@ const Interactable LEVEL_INTERACTABLES[] = {
     {INTERACT_WALL_BUY, {{-10.0f, 0.9f, 5.6f}, {-9.88f, 2.3f, 8.4f}}, false, 2.6f, WEAPON_SMG},
     {INTERACT_WALL_BUY, {{9.88f, 0.9f, 6.6f}, {10.0f, 2.3f, 9.4f}}, false, 2.6f, WEAPON_SHOTGUN},
     {INTERACT_DOOR, DOOR_BOX, false, 3.0f, 0},
-    {INTERACT_PERK, {{8.4f, 0.0f, 12.7f}, {10.0f, 2.4f, 14.0f}}, true, 2.6f, 2500},
+    {INTERACT_PERK, {{8.4f, 0.0f, 12.7f}, {10.0f, 2.4f, 14.0f}}, true, 2.6f, PERK_VITALITY},
 };
 const int LEVEL_INTERACTABLE_COUNT = (int)(sizeof LEVEL_INTERACTABLES / sizeof LEVEL_INTERACTABLES[0]);
 
@@ -615,9 +619,9 @@ static void UpdateRound(GameState *g, float dt)
     }
 }
 
-bool PlayerHasPerk(const Player *p)
+bool PlayerHasPerk(const Player *p, PerkId id)
 {
-    return p->max_health > PLAYER_BASE_HEALTH;
+    return (p->perks & (1u << id)) != 0;
 }
 
 static const WeaponSlot *OwnedSlot(const Player *p, WeaponId id)
@@ -660,12 +664,14 @@ InteractionInfo GameDescribeInteractable(const GameState *g, int index)
         info.verb = "open";
         info.subject = "the door";
         break;
-    case INTERACT_PERK:
-        info.active = !PlayerHasPerk(&g->player);
-        info.cost = it->payload;
+    case INTERACT_PERK: {
+        PerkId id = (PerkId)it->payload;
+        info.active = !PlayerHasPerk(&g->player, id);
+        info.cost = PERKS[id].cost;
         info.verb = "drink";
-        info.subject = PERK_NAME;
+        info.subject = PERKS[id].name;
         break;
+    }
     }
     return info;
 }
@@ -679,10 +685,15 @@ static void ApplyInteraction(GameState *g, const Interactable *it)
     case INTERACT_DOOR:
         g->zone_open[LEVEL_DOORS[it->payload].opens_zone] = true;
         break;
-    case INTERACT_PERK:
-        g->player.max_health = PERK_MAX_HEALTH;
-        g->player.health = PERK_MAX_HEALTH;
+    case INTERACT_PERK: {
+        PerkId id = (PerkId)it->payload;
+        g->player.perks |= (uint8_t)(1u << id);
+        if (id == PERK_VITALITY) {
+            g->player.max_health = PERK_MAX_HEALTH;
+            g->player.health = PERK_MAX_HEALTH;
+        }
         break;
+    }
     }
 }
 

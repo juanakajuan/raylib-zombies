@@ -401,6 +401,7 @@ static void TestDamageRegenAndGameOver(void)
     g.player.points = 4321;
     g.player.max_health = PERK_MAX_HEALTH;
     g.player.health = PERK_MAX_HEALTH;
+    g.player.perks = (uint8_t)((1u << PERK_VITALITY) | (1u << PERK_QUICK_HANDS));
     g.zone_open[1] = true;
     g.round_number = 4;
     g.kills = 17;
@@ -430,6 +431,7 @@ static void TestDamageRegenAndGameOver(void)
     CHECK(g.player.points == START_POINTS, "points=%d", g.player.points);
     CHECK(g.player.max_health == PLAYER_BASE_HEALTH && g.player.health == PLAYER_BASE_HEALTH, "health=%.1f/%.1f",
           (double)g.player.health, (double)g.player.max_health);
+    CHECK(!PlayerHasPerk(&g.player, PERK_VITALITY) && !PlayerHasPerk(&g.player, PERK_QUICK_HANDS), "perks=%d should reset", g.player.perks);
     CHECK(!g.zone_open[1] && g.zone_open[0], "zones=%d,%d", g.zone_open[0], g.zone_open[1]);
     CHECK(g.player.slot_count == 1 && g.player.slots[0].id == WEAPON_PISTOL, "slot_count=%d", g.player.slot_count);
     CHECK(GameAliveZombies(&g) == 0 && g.kills == 0, "alive=%d kills=%d", GameAliveZombies(&g), g.kills);
@@ -548,7 +550,7 @@ static void TestWeaponsAndPerk(void)
 {
     int smg_item = FindInteractable(INTERACT_WALL_BUY, WEAPON_SMG);
     int shotgun_item = FindInteractable(INTERACT_WALL_BUY, WEAPON_SHOTGUN);
-    int perk_item = FindInteractable(INTERACT_PERK, -1);
+    int perk_item = FindInteractable(INTERACT_PERK, PERK_VITALITY);
     FrameInput interact = {.interact_pressed = true};
     FrameInput swap = {.swap_pressed = true};
     FrameInput idle = {0};
@@ -617,9 +619,10 @@ static void TestWeaponsAndPerk(void)
     g.player.health = 30.0f;
     g.player.points = 2499;
     Press(&g, interact);
-    CHECK(!PlayerHasPerk(&g.player) && g.player.points == 2499, "perk bought with 2499 points");
-    g.player.points = LEVEL_INTERACTABLES[perk_item].payload;
+    CHECK(!PlayerHasPerk(&g.player, PERK_VITALITY) && g.player.points == 2499, "perk bought with 2499 points");
+    g.player.points = PERKS[PERK_VITALITY].cost;
     Press(&g, interact);
+    CHECK(PlayerHasPerk(&g.player, PERK_VITALITY), "Vitality Brew should be owned after the purchase");
     CHECK(g.player.max_health == PERK_MAX_HEALTH, "max_health=%.1f", (double)g.player.max_health);
     CHECK(g.player.health == PERK_MAX_HEALTH, "perk should heal to the new max, health=%.1f", (double)g.player.health);
     CHECK(g.player.points == 0, "points=%d", g.player.points);
@@ -830,7 +833,7 @@ static void TestPartitionHidesTheFrontRoomFromTheBackRoom(void)
 
 static void TestDoorwayControlsTheViewIntoTheFrontRoom(void)
 {
-    int perk_item = FindInteractable(INTERACT_PERK, -1);
+    int perk_item = FindInteractable(INTERACT_PERK, PERK_VITALITY);
     Vector3 lined_up = {-3.0f, PLAYER_EYE_HEIGHT, -3.0f};
     GameState g = NewActiveGame();
 
