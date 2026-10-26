@@ -16,6 +16,8 @@
 #define PERK_MAX_HEALTH 250.0f
 #define QUICK_HANDS_RELOAD_SCALE 0.5f
 #define PLAYER_EYE_HEIGHT 1.7f
+#define CROUCH_EYE_HEIGHT 1.0f
+#define PLAYER_HEAD_CLEARANCE 0.1f
 #define PLAYER_RADIUS 0.4f
 #define ZOMBIE_RADIUS 0.4f
 #define ZOMBIE_DAMAGE 40.0f
@@ -37,6 +39,8 @@ typedef struct FrameInput {
     bool interact_pressed;
     bool swap_pressed;
     bool sprint_held;
+    bool crouch_held;
+    bool jump_pressed;
     bool restart_pressed;
 } FrameInput;
 
@@ -88,7 +92,9 @@ typedef struct PerkDef {
 extern const PerkDef PERKS[PERK_COUNT];
 
 typedef struct Player {
-    Vector3 pos; /* feet position, y is always 0 */
+    Vector3 pos; /* feet position, y is the height above the floor */
+    float vertical_speed;
+    float eye_height; /* eases between PLAYER_EYE_HEIGHT and CROUCH_EYE_HEIGHT */
     float yaw; /* 0 looks down -Z, positive turns toward +X */
     float pitch;
     float health;
@@ -168,6 +174,8 @@ typedef struct InteractionInfo {
 
 extern const BoundingBox LEVEL_WALLS[];
 extern const int LEVEL_WALL_COUNT;
+extern const BoundingBox LEVEL_OVERHANGS[];
+extern const int LEVEL_OVERHANG_COUNT;
 extern const Zone LEVEL_ZONES[ZONE_COUNT];
 extern const Door LEVEL_DOORS[];
 extern const int LEVEL_DOOR_COUNT;

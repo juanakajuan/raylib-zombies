@@ -13,6 +13,7 @@
 static const Color SKY = {14, 14, 20, 255};
 static const Color CEILING = {44, 44, 52, 255};
 static const Color WALL = {112, 108, 118, 255};
+static const Color OVERHANG = {104, 62, 44, 255};
 static const Color WALL_WIRE = {40, 38, 46, 255};
 static const Color FLOOR_FRONT[2] = {{94, 86, 78, 255}, {78, 71, 64, 255}};
 static const Color FLOOR_BACK[2] = {{68, 78, 92, 255}, {56, 64, 78, 255}};
@@ -132,6 +133,10 @@ static void DrawLevel(const GameState *g)
     for (int i = 0; i < LEVEL_WALL_COUNT; i++) {
         DrawSolidBox(LEVEL_WALLS[i], WALL);
         DrawCubeWiresV(BoxCenter(LEVEL_WALLS[i]), Vector3Subtract(LEVEL_WALLS[i].max, LEVEL_WALLS[i].min), WALL_WIRE);
+    }
+    for (int i = 0; i < LEVEL_OVERHANG_COUNT; i++) {
+        DrawSolidBox(LEVEL_OVERHANGS[i], OVERHANG);
+        DrawCubeWiresV(BoxCenter(LEVEL_OVERHANGS[i]), Vector3Subtract(LEVEL_OVERHANGS[i].max, LEVEL_OVERHANGS[i].min), WALL_WIRE);
     }
     for (int i = 0; i < LEVEL_INTERACTABLE_COUNT; i++) DrawInteractable(g, &LEVEL_INTERACTABLES[i]);
 }
@@ -342,7 +347,7 @@ void GameDraw(const GameState *g, float fov_degrees)
 {
     const Player *p = &g->player;
     Vector3 eye = PlayerEye(p);
-    if (g->phase == PHASE_GAME_OVER) eye.y = Lerp(PLAYER_EYE_HEIGHT, 0.45f, Clamp(g->phase_timer * 2.0f, 0.0f, 1.0f));
+    if (g->phase == PHASE_GAME_OVER) eye.y = Lerp(eye.y, 0.45f, Clamp(g->phase_timer * 2.0f, 0.0f, 1.0f));
     Camera3D camera = {
         .position = eye,
         .target = Vector3Add(eye, PlayerForward(p)),
