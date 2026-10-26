@@ -33,6 +33,14 @@ WIDTH, HEIGHT = 1280, 720
 # Mirrors src/main.c MOUSE_SENSITIVITY and src/render.c FOV_DEGREES.
 MOUSE_SENSITIVITY = 0.0022
 FOV_DEGREES = 75.0
+# Mirrors src/render.c UI_SCALE_RATE: the HUD grows at half the rate of the window height above 720.
+UI_SCALE_RATE = 0.5
+# Measured title size in BLOOD pixels, scaled to 1280x720: "ROUND 1" 9700, "ROUND 2" 10700, "GAME OVER" 19200.
+BANNER_MIN_PIXELS = 2500
+
+# The game reads input once per frame, so a press and its release in one frame are lost, and so are a release and
+# the next press. Under llvmpipe at 1920x1080 with eight other runs a frame took up to about 0.2 s.
+KEY_TAP = 0.25
 
 # Named HUD regions as (x, y, w, h) in a 1280x720 frame. Mirrors src/render.c GameDrawHud.
 REGIONS: dict[str, tuple[int, int, int, int]] = {
@@ -99,8 +107,11 @@ def alive(pid: int) -> bool:
         return False
     except PermissionError:
         return True
-    stat = Path(f"/proc/{pid}/stat")
-    return stat.is_file() and stat.read_text().split(") ", 1)[1][0] != "Z"
+    # The process can exit between kill() and the read; /proc then raises ESRCH or ENOENT.
+    try:
+        return Path(f"/proc/{pid}/stat").read_text().split(") ", 1)[1][0] != "Z"
+    except (ProcessLookupError, FileNotFoundError):
+        return False
 
 
 def git(*args: str) -> str:
@@ -263,11 +274,21 @@ def find_zombies(image: object) -> list[Target]:
 
 
 def red_banner(image: object) -> bool:
-    """True while a big blood-red title ("ROUND N" or "GAME OVER") is on screen."""
-    region = image.crop((300, 90, 980, 300)).resize((170, 52))  # type: ignore[attr-defined]
-    raw = region.convert("RGB").tobytes()  # type: ignore[attr-defined]
-    red = sum(1 for i in range(0, len(raw), 3) if raw[i] > 150 and raw[i + 1] < 70 and raw[i + 2] < 70)
-    return red > 300
+    """True while a big blood-red title ("ROUND N" or "GAME OVER") is on screen.
+
+    Mirrors src/render.c DrawHud: the titles are BLOOD (200, 24, 24) text centred at UI y height/7 (96 px) and
+    height/4 (110 px), and the UI is scaled by UiScale. Zombie health bars are (200, 30, 30) and the low-health
+    vignette blends toward (170, 0, 0), which lowers red as fast as green, so a match within 2 of BLOOD ignores both.
+    """
+    width, height = image.size  # type: ignore[attr-defined]
+    scale = 1.0 + (height / HEIGHT - 1.0) * UI_SCALE_RATE
+    ui_width, ui_height = width / scale, height / scale
+    box = (ui_width / 2 - 360, ui_height / 7 - 10, ui_width / 2 + 360, ui_height / 4 + 120)
+    region = image.crop(tuple(round(v * scale) for v in box))  # type: ignore[attr-defined]
+    raw = region.convert("RGB").tobytes()
+    title = sum(1 for i in range(0, len(raw), 3)
+                if abs(raw[i] - 200) <= 2 and abs(raw[i + 1] - 24) <= 2 and abs(raw[i + 2] - 24) <= 2)
+    return title > BANNER_MIN_PIXELS * scale * scale
 
 
 def pixels_to_mouse(px: float, py: float, size: tuple[int, int]) -> tuple[int, int]:
@@ -534,12 +555,17 @@ def cmd_hunt(args: argparse.Namespace) -> None:
         session.keys_up(["r"])
 
     stop_reason = "time"
+    # A hunt that starts during a countdown sees that round's banner, so only a banner that comes back counts.
+    banner_gone = False
     deadline = time.time() + args.seconds
     while time.time() < deadline and alive(session.state.game_pid):
         frame = session.grab()
-        if args.until_clear and shots > 0 and red_banner(frame):
-            stop_reason = "red banner (round cleared, or game over)"
-            break
+        if args.until_clear:
+            if not red_banner(frame):
+                banner_gone = True
+            elif banner_gone:
+                stop_reason = "red banner (round cleared, or game over)"
+                break
         targets = find_zombies(frame)
         if not targets:
             if since_reload > 0:
@@ -632,9 +658,9 @@ def main() -> None:
     add("window", cmd_window, "print the game window size and whether it is windowed or fullscreen")
     p = add("key", cmd_key, "press keys, e.g. w, e, r, q, Escape, F11, Alt_L+Return, w+Shift_L")
     p.add_argument("keys")
-    p.add_argument("--hold", type=float, default=0.08, help="seconds the keys stay down")
+    p.add_argument("--hold", type=float, default=KEY_TAP, help="seconds the keys stay down")
     p.add_argument("--repeat", type=int, default=1)
-    p.add_argument("--gap", type=float, default=0.12, help="seconds between repeats")
+    p.add_argument("--gap", type=float, default=KEY_TAP, help="seconds between repeats")
     p = add("click", cmd_click, "left mouse button (fire)")
     p.add_argument("--count", type=int, default=1)
     p.add_argument("--hold", type=float, default=0.05, help="seconds held; hold long for the automatic MP5K")
