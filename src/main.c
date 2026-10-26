@@ -362,7 +362,7 @@ static int RunSmoke(void)
 int main(int argc, char **argv)
 {
     bool smoke = false;
-    DisplayMode mode = DISPLAY_WINDOWED;
+    DisplayMode mode = DISPLAY_FULLSCREEN;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--smoke") == 0) {
             smoke = true;
