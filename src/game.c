@@ -9,7 +9,6 @@
 #define SPRINT_SPEED 6.5f
 #define PITCH_LIMIT (89.0f * DEG2RAD)
 #define SWAP_TIME 0.3f
-#define HEADSHOT_MULTIPLIER 2.0f
 #define HIT_POINTS 10
 #define KILL_POINTS 60
 #define HEADSHOT_KILL_POINTS 100
@@ -266,10 +265,29 @@ static void PushEvent(GameState *g, GameEventKind kind, int arg)
     g->events[g->event_count++] = (GameEvent){kind, arg};
 }
 
-static void DamageZombie(GameState *g, Zombie *z, float damage, bool headshot)
+static void RecordDamageNumber(GameState *g, const Zombie *z, Vector3 point, float amount, bool headshot, bool kill)
+{
+    int index = (int)(z - g->zombies);
+    DamageNumber *slot = &g->damage_numbers[0];
+    for (int i = 0; i < MAX_DAMAGE_NUMBERS; i++) {
+        DamageNumber *n = &g->damage_numbers[i];
+        if (n->zombie == index && n->timer == DAMAGE_NUMBER_TIME) {
+            n->amount += amount;
+            n->headshot = n->headshot || headshot;
+            n->kill = n->kill || kill;
+            return;
+        }
+        if (n->timer < slot->timer) slot = n;
+    }
+    *slot = (DamageNumber){point, amount, DAMAGE_NUMBER_TIME, index, headshot, kill};
+}
+
+static void DamageZombie(GameState *g, Zombie *z, Vector3 point, float damage, bool headshot)
 {
     Player *p = &g->player;
-    z->health -= headshot ? damage * HEADSHOT_MULTIPLIER : damage;
+    float amount = headshot ? damage * HEADSHOT_MULTIPLIER : damage;
+    z->health -= amount;
+    RecordDamageNumber(g, z, point, amount, headshot, z->health <= 0.0f);
     z->hit_flash = ZOMBIE_HIT_FLASH_TIME;
     p->hitmarker_timer = HITMARKER_TIME;
     if (z->health > 0.0f) {
@@ -307,7 +325,7 @@ static void CastShot(GameState *g, Ray ray, float damage)
             headshot = false;
         }
     }
-    if (hit != NULL) DamageZombie(g, hit, damage, headshot);
+    if (hit != NULL) DamageZombie(g, hit, Vector3Add(ray.position, Vector3Scale(ray.direction, nearest)), damage, headshot);
 }
 
 static Vector3 PelletDirection(GameState *g, float spread)
@@ -740,6 +758,7 @@ void GameUpdate(GameState *g, const FrameInput *in, float dt)
 {
     g->event_count = 0;
     g->phase_timer += dt;
+    for (int i = 0; i < MAX_DAMAGE_NUMBERS; i++) g->damage_numbers[i].timer = fmaxf(0.0f, g->damage_numbers[i].timer - dt);
     if (g->phase == PHASE_GAME_OVER) {
         for (int i = 0; i < MAX_ZOMBIES; i++) TickZombieTimers(&g->zombies[i], dt);
         if (in->restart_pressed && g->phase_timer >= RESTART_DELAY) GameInit(g, RngNext(g));

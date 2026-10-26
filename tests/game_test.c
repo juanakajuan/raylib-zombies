@@ -1010,6 +1010,84 @@ static void TestHitAndKillEvents(void)
     CHECK(CountEvents(&miss, EVENT_HIT) == 0, "a miss must not play a hit");
 }
 
+static int CountDamageNumbers(const GameState *g)
+{
+    int count = 0;
+    for (int i = 0; i < MAX_DAMAGE_NUMBERS; i++) count += g->damage_numbers[i].timer > 0.0f;
+    return count;
+}
+
+static const DamageNumber *FirstDamageNumber(const GameState *g)
+{
+    for (int i = 0; i < MAX_DAMAGE_NUMBERS; i++) {
+        if (g->damage_numbers[i].timer > 0.0f) return &g->damage_numbers[i];
+    }
+    return NULL;
+}
+
+static void TestDamageNumbers(void)
+{
+    FrameInput fire = {.fire_pressed = true};
+    FrameInput idle = {0};
+    const float damage = WEAPONS[WEAPON_PISTOL].damage;
+
+    GameState body = NewActiveGame();
+    Zombie *z = PlaceZombie(&body, (Vector3){0.0f, 0.0f, 4.0f}, 500.0f);
+    AimAt(&body.player, (Vector3){z->pos.x, 0.7f, z->pos.z});
+    Press(&body, fire);
+    const DamageNumber *n = FirstDamageNumber(&body);
+    CHECK(CountDamageNumbers(&body) == 1 && n != NULL, "a body hit must create one number, got %d", CountDamageNumbers(&body));
+    CHECK(n != NULL && n->amount == damage && !n->headshot && !n->kill && n->zombie == (int)(z - body.zombies),
+          "body number amount=%.1f headshot=%d kill=%d", n ? (double)n->amount : -1.0, n ? n->headshot : -1, n ? n->kill : -1);
+    CHECK(n != NULL && fabsf(n->pos.x) < 0.01f && fabsf(n->pos.z - z->pos.z) < 0.5f && fabsf(n->pos.y - 0.7f) < 0.2f,
+          "the number must start at the hit point, pos=%.2f,%.2f,%.2f", n ? (double)n->pos.x : 0.0, n ? (double)n->pos.y : 0.0, n ? (double)n->pos.z : 0.0);
+
+    GameState head = NewActiveGame();
+    z = PlaceZombie(&head, (Vector3){0.0f, 0.0f, 4.0f}, 500.0f);
+    AimAt(&head.player, (Vector3){z->pos.x, 1.65f, z->pos.z});
+    Press(&head, fire);
+    n = FirstDamageNumber(&head);
+    CHECK(n != NULL && n->headshot && n->amount == damage * HEADSHOT_MULTIPLIER, "headshot number amount=%.1f", n ? (double)n->amount : -1.0);
+
+    GameState killed = NewActiveGame();
+    z = PlaceZombie(&killed, (Vector3){0.0f, 0.0f, 4.0f}, 10.0f);
+    AimAt(&killed.player, (Vector3){z->pos.x, 0.7f, z->pos.z});
+    Press(&killed, fire);
+    n = FirstDamageNumber(&killed);
+    CHECK(n != NULL && n->kill, "the killing blow must mark its number");
+
+    GameState blast = NewActiveGame();
+    blast.player.slots[0] = (WeaponSlot){WEAPON_SHOTGUN, WEAPONS[WEAPON_SHOTGUN].mag_size, WEAPONS[WEAPON_SHOTGUN].reserve_max};
+    z = PlaceZombie(&blast, (Vector3){0.0f, 0.0f, 1.2f}, 9000.0f);
+    AimAt(&blast.player, (Vector3){z->pos.x, 0.7f, z->pos.z});
+    Press(&blast, fire);
+    n = FirstDamageNumber(&blast);
+    CHECK(CountDamageNumbers(&blast) == 1 && n != NULL, "pellets on one zombie must merge, got %d numbers", CountDamageNumbers(&blast));
+    CHECK(n != NULL && fabsf(n->amount - (9000.0f - z->health)) < 0.01f && n->amount > damage, "merged amount=%.1f health lost=%.1f",
+          n ? (double)n->amount : -1.0, (double)(9000.0f - z->health));
+
+    for (float t = 0.0f; t < DAMAGE_NUMBER_TIME + 0.05f; t += DT) GameUpdate(&body, &idle, DT);
+    CHECK(CountDamageNumbers(&body) == 0, "numbers must free their slot after DAMAGE_NUMBER_TIME");
+
+    GameState full = NewActiveGame();
+    for (int i = 0; i < MAX_DAMAGE_NUMBERS; i++) {
+        full.damage_numbers[i] = (DamageNumber){.amount = 1.0f, .timer = 0.1f + 0.01f * (float)i, .zombie = MAX_ZOMBIES - 1};
+    }
+    z = PlaceZombie(&full, (Vector3){0.0f, 0.0f, 4.0f}, 500.0f);
+    AimAt(&full.player, (Vector3){z->pos.x, 0.7f, z->pos.z});
+    Press(&full, fire);
+    CHECK(CountDamageNumbers(&full) == MAX_DAMAGE_NUMBERS && full.damage_numbers[0].amount == damage && full.damage_numbers[1].amount == 1.0f,
+          "a full pool must recycle the oldest number");
+
+    GameState over = NewActiveGame();
+    z = PlaceZombie(&over, (Vector3){0.0f, 0.0f, 4.0f}, 500.0f);
+    AimAt(&over.player, (Vector3){z->pos.x, 0.7f, z->pos.z});
+    Press(&over, fire);
+    over.phase = PHASE_GAME_OVER;
+    for (float t = 0.0f; t < DAMAGE_NUMBER_TIME + 0.05f; t += DT) GameUpdate(&over, &idle, DT);
+    CHECK(CountDamageNumbers(&over) == 0, "numbers must finish during game over");
+}
+
 static void TestZombieAndPlayerDamageEvents(void)
 {
     FrameInput idle = {0};
@@ -1208,6 +1286,7 @@ int main(void)
     TestDoorwayControlsTheViewIntoTheFrontRoom();
     TestFireAndReloadEvents();
     TestHitAndKillEvents();
+    TestDamageNumbers();
     TestZombieAndPlayerDamageEvents();
     TestRoundEvents();
     TestPurchaseEvents();

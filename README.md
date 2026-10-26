@@ -43,6 +43,7 @@ The pause menu lists volume (0 to 1), mouse sensitivity (0.2x to 3x) and field o
 
 - Rounds with an intermission countdown. Zombie count, health and speed grow each round, with sprinters from round 4.
 - Hitscan shooting with headshots. Points: 10 per hit, 60 per kill, 100 per headshot kill.
+- A health bar above every living zombie, and floating damage numbers when you shoot one (yellow for headshots, orange for kills).
 - Three weapons from a data table: M1911 pistol, MP5K (1000 points, automatic) and shotgun (1500 points, multi-pellet). You carry two.
 - A 750 point door that opens the back room and its zombie spawns.
 - Two perks: Vitality Brew (2500 points) raises max health from 100 to 250. Quick Hands (3000 points, back room) halves reload time.

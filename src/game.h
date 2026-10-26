@@ -12,6 +12,7 @@
 #define ZONE_COUNT 2
 
 #define START_POINTS 500
+#define HEADSHOT_MULTIPLIER 2.0f
 #define PLAYER_BASE_HEALTH 100.0f
 #define PERK_MAX_HEALTH 250.0f
 #define QUICK_HANDS_RELOAD_SCALE 0.5f
@@ -191,6 +192,18 @@ typedef enum GameEventKind {
     EVENT_PURCHASE_DENIED,
 } GameEventKind;
 
+#define MAX_DAMAGE_NUMBERS 32
+#define DAMAGE_NUMBER_TIME 0.8f
+
+typedef struct DamageNumber {
+    Vector3 pos;     /* world point where the first pellet hit */
+    float amount;    /* damage applied, headshot multiplier included */
+    float timer;     /* counts down from DAMAGE_NUMBER_TIME, 0 means the slot is free */
+    int zombie;      /* index into GameState.zombies */
+    bool headshot;
+    bool kill;
+} DamageNumber;
+
 typedef struct GameEvent {
     GameEventKind kind;
     int arg;
@@ -199,6 +212,7 @@ typedef struct GameEvent {
 typedef struct GameState {
     Player player;
     Zombie zombies[MAX_ZOMBIES];
+    DamageNumber damage_numbers[MAX_DAMAGE_NUMBERS];
     GamePhase phase;
     float phase_timer; /* seconds spent in the current phase */
     int round_number;
