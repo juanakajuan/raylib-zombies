@@ -10,9 +10,11 @@
 #define PEAK 0.85f
 #define TWO_PI (2.0f * PI)
 
-#define SOUND_ID_ROWS(id, ...) SOUND_FIRE_##id, SOUND_RELOAD_##id,
+#define SOUND_FIRE_ID_ROW(id, ...) SOUND_FIRE_##id,
+#define SOUND_RELOAD_ID_ROW(id, ...) SOUND_RELOAD_##id,
 typedef enum SoundId {
-    WEAPON_LIST(SOUND_ID_ROWS)
+    WEAPON_LIST(SOUND_FIRE_ID_ROW)
+    WEAPON_LIST(SOUND_RELOAD_ID_ROW)
     SOUND_HIT,
     SOUND_KILL,
     SOUND_HEADSHOT_KILL,

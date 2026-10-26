@@ -1,6 +1,6 @@
 # Debug tools
 
-Started with `--debug`, F1 opens a `DEBUG` overlay that freezes the game, frees the mouse and lists cheat commands: `+5000 points`, one `Give <weapon>` row per weapon, one `Give <perk>` row per perk, `Refill ammo`, `Full health`, `God mode: ON/OFF`, `Open all doors` and `Skip round`. Up/Down move the selection (it wraps), hovering a row selects it, and Enter or a click on a row applies it. F1 or Esc closes the overlay. While god mode is on, `GOD MODE` shows in the top right of the HUD. Without `--debug`, F1 does nothing. `--debug` also writes one `AUDIO: t=<seconds> sound=<id> <file>` line to the log for each sound the game plays, also when muted.
+Started with `--debug`, F1 opens a `DEBUG` overlay that freezes the game, frees the mouse and lists cheat commands: `+5000 points`, one `Give <weapon>` row per weapon, one `Give <perk>` row per perk, `Refill ammo`, `Full health`, `God mode: ON/OFF`, `Open all doors` and `Skip round`. Up/Down move the selection (it wraps), hovering a row selects it, and Enter or a click on a row applies it. F1 or Esc closes the overlay. While god mode is on, `GOD MODE` shows in the top right of the HUD. Without `--debug`, F1 does nothing. `--debug` also writes one `DEBUG: AUDIO: t=<seconds> sound=<id> <file>` line to the log for each sound event, also when muted. `<file>` is the first file of that sound's row in `SOUNDS`, or `synth` for a row with no file. It is not always the variant that plays: growls show `growl_1.wav` for each growl.
 
 ## Sub-features
 
@@ -25,7 +25,7 @@ Preconditions:
 - **Points.** Run `zv key Return && zv key F1 && sleep 0.3 && zv shot 02-points --crop points`. Points read 5500 (500 plus 5000).
 - **Give a weapon.** Run `zv key F1 && zv key Down && zv key Down && zv key Return && zv key F1 && zv shot 03-smg`. The HUD shows MP5K with a full `32 / 192` magazine.
 - **Close with Esc.** Run `zv key F1 && zv key Escape && zv shot 04-closed`. The overlay is gone.
-- **Sound log.** Run `zv click`, then `grep 'AUDIO: t=' verify-artifacts/debug-1/game.log`. The last line names `fire_smg.wav`.
+- **Sound log.** Run `zv click`, then `grep 'fire_smg.wav' verify-artifacts/debug-1/game.log`. One line shows for each shot. Do not read only the last `AUDIO` line, because zombie growls also write lines.
 - **Proof.** Report shots 01 to 04 from `verify-artifacts/debug-1/`.
 
 ## Gotchas

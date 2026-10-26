@@ -105,6 +105,7 @@ typedef struct Player {
     float health;
     float max_health;
     uint8_t perks; /* bit PerkId is set once that perk is bought */
+    _Static_assert(PERK_COUNT <= 8, "Player.perks has one bit per perk");
     float time_since_damage;
     int points;
     WeaponSlot slots[MAX_SLOTS];
@@ -117,8 +118,6 @@ typedef struct Player {
     float muzzle_timer;
     float damage_flash;
 } Player;
-
-_Static_assert(PERK_COUNT <= 8, "Player.perks has one bit per perk");
 
 typedef enum ZombieState {
     ZOMBIE_FREE,
