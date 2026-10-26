@@ -38,10 +38,11 @@ KEYWORDS = {"then", "do", "else", "elif", "if", "while", "until", "!", "{"}
 ASSIGNMENT = re.compile(r"\w+=.*", re.DOTALL)
 GAME = re.compile(r"(.*/)?run\.sh|.*/zombies", re.DOTALL)
 MUTE_VAR = re.compile(r"ZOMBIES_MUTE=(?!0?$).*", re.DOTALL)
-DELIMITER = re.compile(r"[ \t]*(['\"]?)([^\s'\";&|()<>]+)\1")
+DELIMITER = re.compile(r"[ \t]*(\\?)(['\"]?)([^\s'\";&|()<>\\]+)\2")
 
 # Code found inside a command: its text, the index of the simple command it belongs to, and whether it always runs.
-# A heredoc body runs only when that simple command is a shell.
+# A heredoc body runs only when that simple command feeds a shell. The `$(...)` and backticks in a body with an
+# unquoted delimiter always run, so that body is also kept as a double-quoted string.
 Nested = tuple[str, int, bool]
 
 
@@ -53,7 +54,7 @@ def scan(t: str, i: int = 0, closer: bool = False) -> tuple[list[list[str]], lis
     """
     segments: list[list[str]] = [[]]
     nested: list[Nested] = []
-    heredocs: list[tuple[str, bool, int]] = []
+    heredocs: list[tuple[str, bool, bool, int]] = []
     word: list[str] | None = None
     depth = 0
     n = len(t)
@@ -154,18 +155,20 @@ def scan(t: str, i: int = 0, closer: bool = False) -> tuple[list[list[str]], lis
         elif c == "\n":
             new_segment()
             i += 1
-            for delimiter, strip, index in heredocs:
-                start = i
+            for delimiter, strip, quoted, index in heredocs:
+                start = body_end = i
                 while i < n:
                     end = t.find("\n", i)
                     end = n if end < 0 else end
                     line = t[i:end]
                     i = min(n, end + 1)
                     if (line.lstrip("\t") if strip else line) == delimiter:
-                        nested.append((t[start:end - len(line)], index, False))
                         break
-                else:
-                    nested.append((t[start:], index, False))
+                    body_end = i
+                body = t[start:body_end]
+                nested.append((body, index, False))
+                if not quoted:
+                    nested.append(('echo "' + body.replace("\\", "\\\\").replace('"', '\\"') + '"', index, True))
             heredocs = []
         elif c == ")" and closer and depth == 0:
             end_word()
@@ -188,7 +191,7 @@ def scan(t: str, i: int = 0, closer: bool = False) -> tuple[list[list[str]], lis
             strip = t.startswith("<<-", i)
             match = DELIMITER.match(t, i + 2 + strip)
             if match:
-                heredocs.append((match[2], strip, len(segments) - 1))
+                heredocs.append((match[3], strip, bool(match[1] or match[2]), len(segments) - 1))
                 i = match.end()
             else:
                 i += 2 + strip
@@ -213,6 +216,11 @@ def program(words: list[str]) -> str:
     return words[0].rsplit("/", 1)[-1] if words and words[0] != "." else "".join(words[:1])
 
 
+def feeds_shell(words: list[str]) -> bool:
+    name = program(words)
+    return name in SHELLS or (name in LAUNCHERS and any(word.rsplit("/", 1)[-1] in SHELLS for word in words[1:]))
+
+
 def unmuted_launch(command: str, muted: bool = False) -> bool:
     """True when a simple command starts the game, directly or after a launcher word, with no mute for it."""
     segments, nested, _ = scan(command)
@@ -220,7 +228,7 @@ def unmuted_launch(command: str, muted: bool = False) -> bool:
     segment_muted = [muted or "--mute" in segment or any(MUTE_VAR.fullmatch(word) for word in segment)
                      for segment in segments]
     for text, index, always_runs in nested:
-        if (always_runs or program(command_words(segments[index])) in SHELLS) and unmuted_launch(text, segment_muted[index]):
+        if (always_runs or feeds_shell(command_words(segments[index]))) and unmuted_launch(text, segment_muted[index]):
             return True
     for segment, segment_is_muted in zip(segments, segment_muted):
         words = command_words(segment)
@@ -306,6 +314,12 @@ SELFTEST: list[tuple[str, bool]] = [
     ("sed -i s#foo#bar#g src/x.c && ./build/zombies --smoke", True),
     ("git commit -m \"$(cat <<'EOF'\nfix: support 27\" monitors\nEOF\n)\"\n./build/zombies --smoke", True),
     ("echo $(./build/zombies --smoke)", True),
+    ("timeout 30 bash <<'EOF'\n./build/zombies --smoke\nEOF", True),
+    ("env ZOMBIES_X=1 bash <<'EOF'\n./build/zombies --smoke\nEOF", True),
+    ("gh pr create --title t --body \"$(cat <<EOF\n## Test plan\n- `./build/zombies --smoke`\nEOF\n)\"", True),
+    ("cat > notes.md <<EOF\nRan `./build/zombies --smoke`\nEOF", True),
+    ("cat > notes.md <<EOF\nRan $(./build/zombies --smoke)\nEOF", True),
+    ("cat <<\\EOF\nx\nEOF\n./build/zombies", True),
     ("./build/zombies --smoke 2>&1 | tee log", True),
     ("{ ./build/zombies; }", True),
     ("if true; then ./build/zombies; fi", True),
@@ -340,6 +354,9 @@ SELFTEST: list[tuple[str, bool]] = [
     ("gh pr comment 26 --body \"$(cat <<'EOF'\nRun ./build/zombies --mute, not ./run.sh.\nEOF\n)\"", False),
     ("echo $((1<<4))", False),
     ("cat <<< './build/zombies'", False),
+    ("cat > notes.md <<'EOF'\nRan `./build/zombies --smoke`\nEOF", False),
+    ("cat > notes.md <<EOF\nRan ./build/zombies --smoke and \"$HOME\" \\ ok\nEOF", False),
+    ("cat <<\\EOF\n`./build/zombies`\nEOF", False),
     ('git commit -m "first line\n\n./build/zombies now needs --mute"', False),
     ("git commit -m \"$(cat <<'EOF'\nDon't run ./build/zombies; use zv\nEOF\n)\"", False),
     ("gh pr create --body-file - <<'EOF'\n## Summary\n./run.sh is blocked, see #15\nEOF", False),
