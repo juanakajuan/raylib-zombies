@@ -474,10 +474,20 @@ void DrawPauseOverlay(const Settings *settings, int selected, bool fullscreen)
 
 #define DEBUG_ROW_HEIGHT 32
 #define DEBUG_FONT_SIZE 24
+#define DEBUG_TITLE_SIZE 56
+#define DEBUG_TITLE_GAP 70
+#define DEBUG_FOOTER_GAP 16
+#define DEBUG_FOOTER_SIZE 20
 
+/* The rows stay left-aligned, so the list is centered by its widest label. */
 Rectangle DebugRowBounds(int row)
 {
-    return (Rectangle){(float)(UiWidth() / 2 - 200), (float)(90 + row * DEBUG_ROW_HEIGHT), 400.0f, (float)DEBUG_ROW_HEIGHT};
+    int list_width = 0;
+    for (int i = 0; i < DEBUG_COMMAND_COUNT; i++) list_width = (int)fmaxf((float)list_width, (float)MeasureText(DEBUG_COMMANDS[i].label, DEBUG_FONT_SIZE));
+    int menu_height = DEBUG_TITLE_GAP + DEBUG_COMMAND_COUNT * DEBUG_ROW_HEIGHT + DEBUG_FOOTER_GAP + DEBUG_FOOTER_SIZE;
+    int top = (UiHeight() - menu_height) / 2 + DEBUG_TITLE_GAP;
+    return (Rectangle){(float)((UiWidth() - list_width) / 2), (float)(top + row * DEBUG_ROW_HEIGHT), (float)list_width,
+                       (float)DEBUG_ROW_HEIGHT};
 }
 
 void DrawDebugOverlay(const GameState *g, int selected)
@@ -486,7 +496,7 @@ void DrawDebugOverlay(const GameState *g, int selected)
     rlPushMatrix();
     rlScalef(UiScale(), UiScale(), 1.0f);
     DrawRectangle(0, 0, width, height, (Color){0, 0, 0, 150});
-    DrawTextCentered("DEBUG", width / 2, 20, 56, WHITE);
+    DrawTextCentered("DEBUG", width / 2, (int)DebugRowBounds(0).y - DEBUG_TITLE_GAP, DEBUG_TITLE_SIZE, WHITE);
 
     for (int i = 0; i < DEBUG_COMMAND_COUNT; i++) {
         Rectangle row = DebugRowBounds(i);
@@ -497,6 +507,6 @@ void DrawDebugOverlay(const GameState *g, int selected)
     }
 
     DrawTextCentered("Up/Down select, Enter or click apply, F1 or Esc close", width / 2,
-                     (int)DebugRowBounds(DEBUG_COMMAND_COUNT).y + 16, 20, (Color){255, 230, 120, 255});
+                     (int)DebugRowBounds(DEBUG_COMMAND_COUNT).y + DEBUG_FOOTER_GAP, DEBUG_FOOTER_SIZE, (Color){255, 230, 120, 255});
     rlPopMatrix();
 }
