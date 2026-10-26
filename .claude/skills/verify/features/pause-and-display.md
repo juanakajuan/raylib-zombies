@@ -11,7 +11,7 @@ Esc pauses the game: the simulation stops, the mouse is freed and a `PAUSED` ove
 - `display-menu` switches fullscreen and windowed from the `window mode` row with Left/Right or a click. It is the fourth row, so press Down three times after Esc.
 - `display-toggle` switches fullscreen and windowed with F11 and with Alt+Enter, also while paused.
 - `display-flags` starts fullscreen with `--fullscreen` or no flag, and windowed with `--windowed`.
-- `display-bad-flag` prints `usage: ... [--fullscreen | --windowed] [--smoke] [--debug]` and exits 2 on an unknown flag.
+- `display-bad-flag` prints `usage: ... [--fullscreen | --windowed] [--smoke] [--debug] [--mute]` and exits 2 on an unknown flag.
 
 ## How to get to it (user POV)
 
@@ -32,7 +32,7 @@ Preconditions:
 - **Alt+Enter.** Run `zv key Alt_L+Return && sleep 0.5 && zv window`. It reads `mode fullscreen` again.
 - **Quit.** Pause and press Q. Run `zv key Escape && zv key q; sleep 1; zv doctor`. The `zv key q` call may print `the X display closed`. Doctor reports `PROBLEM game pid ... is not running`, which is the expected result here.
 - **Start flags.** Run `zv stop --run display-1`, then `zv launch --run display-2 --output 1920x1080 -- --windowed && zv window`. It reads `mode windowed`. Stop it with `zv stop --run display-2`.
-- **Bad flag.** Run `./build/zombies --bogus; echo "exit=$?"`. It prints the usage line and `exit=2` without opening a window.
+- **Bad flag.** Run `./build/zombies --mute --bogus; echo "exit=$?"`. It prints the usage line and `exit=2` without opening a window.
 - **Proof.** Report shots 01 to 04 (shot 04 shows the 1280x720 window), the `zv window` lines (also in `actions.log`) from `verify-artifacts/display-1/` and `verify-artifacts/display-2/`.
 
 ## Gotchas

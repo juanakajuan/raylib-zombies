@@ -443,18 +443,21 @@ int main(int argc, char **argv)
 {
     bool smoke = false;
     bool debug = false;
+    bool muted = AudioMuted(argc, argv);
     DisplayMode mode = DISPLAY_FULLSCREEN;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--smoke") == 0) {
             smoke = true;
         } else if (strcmp(argv[i], "--debug") == 0) {
             debug = true;
+        } else if (strcmp(argv[i], "--mute") == 0) {
+            continue;
         } else if (strcmp(argv[i], "--fullscreen") == 0) {
             mode = DISPLAY_FULLSCREEN;
         } else if (strcmp(argv[i], "--windowed") == 0) {
             mode = DISPLAY_WINDOWED;
         } else {
-            fprintf(stderr, "usage: %s [--fullscreen | --windowed] [--smoke] [--debug]\n", argv[0]);
+            fprintf(stderr, "usage: %s [--fullscreen | --windowed] [--smoke] [--debug] [--mute]\n", argv[0]);
             return 2;
         }
     }
@@ -465,7 +468,7 @@ int main(int argc, char **argv)
     ClearWindowState(FLAG_WINDOW_HIDDEN);
     SetDisplayMode(smoke ? DISPLAY_WINDOWED : mode);
     SetTargetFPS(TARGET_FPS);
-    AudioInit();
+    AudioInit(muted);
     int status = smoke ? RunSmoke() : RunGame(debug);
     AudioShutdown();
     CloseWindow();

@@ -2,6 +2,7 @@
 
 #include <math.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define SAMPLE_RATE 22050
 #define VOICES 4
@@ -51,7 +52,9 @@ typedef struct VoiceBank {
     int next_voice[MAX_VARIANTS];
 } VoiceBank;
 
-_Static_assert(WEAPON_PISTOL == 0 && WEAPON_SMG == 1 && WEAPON_SHOTGUN == 2, "fire and reload sounds are indexed by WeaponId");
+_Static_assert(WEAPON_PISTOL == 0, "fire and reload sounds are indexed by WeaponId");
+_Static_assert(SOUND_RELOAD_PISTOL - SOUND_FIRE_PISTOL == WEAPON_COUNT, "one fire sound per weapon, in WeaponId order");
+_Static_assert(SOUND_HIT - SOUND_RELOAD_PISTOL == WEAPON_COUNT, "one reload sound per weapon, in WeaponId order");
 
 static VoiceBank g_bank[SOUND_COUNT];
 static bool g_ready = false;
@@ -263,8 +266,22 @@ static void LoadBank(SoundId id)
     }
 }
 
-void AudioInit(void)
+bool AudioMuted(int argc, char **argv)
 {
+    const char *env = getenv("ZOMBIES_MUTE");
+    if (env != NULL && env[0] != '\0' && strcmp(env, "0") != 0) return true;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--mute") == 0) return true;
+    }
+    return false;
+}
+
+void AudioInit(bool muted)
+{
+    if (muted) {
+        TraceLog(LOG_INFO, "AUDIO: muted, audio device not opened");
+        return;
+    }
     InitAudioDevice();
     g_ready = IsAudioDeviceReady();
     if (!g_ready) return;

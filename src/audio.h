@@ -3,8 +3,10 @@
 
 #include "game.h"
 
-/* Without an audio device the calls below do nothing. */
-void AudioInit(void);
+/* True for --mute or ZOMBIES_MUTE set to a value other than empty or 0. */
+bool AudioMuted(int argc, char **argv);
+/* Without an audio device the calls below do nothing. When muted, the device is never opened. */
+void AudioInit(bool muted);
 void AudioPlayEvent(const GameEvent *event);
 void AudioShutdown(void);
 

@@ -23,7 +23,7 @@ Secondary surfaces:
 ## Requirements
 
 - `gamescope` (headless backend), `cmake`, a C compiler, `python3` with `Xlib` (python-xlib) and `PIL` (Pillow). On this machine all are present.
-- The first configure downloads raylib 5.5 with CMake `FetchContent`. In a git worktree of this repo, reuse the main checkout's copy instead: `export FETCHCONTENT_SOURCE_DIR_RAYLIB=<main checkout>/build/_deps/raylib-src` before `zv launch` or `zv build`.
+- Configure uses the shared raylib 5.5 source in `${XDG_CACHE_HOME:-~/.cache}/raylib-zombies/raylib-5.5`. The first configure on a machine clones it there. All worktrees use it, so no export is necessary.
 
 ## Launch
 
@@ -33,7 +33,7 @@ zv launch --run <name> -- --fullscreen     # game arguments after --
 ```
 
 - `--output WxH` sets the headless monitor size (default `1280x720`, the game's window size). Use `--output 1920x1080` to test fullscreen, because then fullscreen is larger than the window.
-- `launch` runs `cmake` configure (only when `build/CMakeCache.txt` is missing) and `cmake --build build -j`, then starts `gamescope --backend headless -W 1280 -H 720 -- build/zombies`. Use `--no-build` to skip the build when you just built.
+- `launch` runs `cmake` configure (only when `build/CMakeCache.txt` is missing) and `cmake --build build -j`, then starts `gamescope --backend headless -W 1280 -H 720 -- build/zombies --mute` with `ZOMBIES_MUTE=1`. The game log then has `AUDIO: muted, audio device not opened`. Use `--no-build` to skip the build when you just built.
 - The game runs with `LIBGL_ALWAYS_SOFTWARE=1` (llvmpipe). With hardware GL the window pixels that X returns are stale. Do not remove this.
 - Ready means: the game log has `TIMER: Target time per frame` and the window has drawn a HUD frame. `launch` waits for this and prints `ready run=<name> display=:N dir=<path>`. On failure it exits non-zero and names the log to read.
 - There is no data directory and no seed data. Each launch is a fresh game: round 1, 500 points, M1911 `8 / 96`, 100 health, 5 s "Get ready" countdown. The RNG seed is the clock, so zombie spawns differ every run.
