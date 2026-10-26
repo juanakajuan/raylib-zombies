@@ -168,7 +168,8 @@ def scan(t: str, i: int = 0, closer: bool = False) -> tuple[list[list[str]], lis
                 body = t[start:body_end]
                 nested.append((body, index, False))
                 if not quoted:
-                    nested.append(('echo "' + body.replace("\\", "\\\\").replace('"', '\\"') + '"', index, True))
+                    as_double_quoted = re.sub(r"\\(?![$`\\\n])", r"\\\\", body).replace('"', '\\"')
+                    nested.append(('echo "' + as_double_quoted + '"', index, True))
             heredocs = []
         elif c == ")" and closer and depth == 0:
             end_word()
@@ -357,6 +358,10 @@ SELFTEST: list[tuple[str, bool]] = [
     ("cat > notes.md <<'EOF'\nRan `./build/zombies --smoke`\nEOF", False),
     ("cat > notes.md <<EOF\nRan ./build/zombies --smoke and \"$HOME\" \\ ok\nEOF", False),
     ("cat <<\\EOF\n`./build/zombies`\nEOF", False),
+    ("gh pr create --title t --body \"$(cat <<EOF\n## Test plan\n- \\`./build/zombies --smoke\\` is blocked\nEOF\n)\"", False),
+    ("cat > notes.md <<EOF\nDo not run \\`./build/zombies --smoke\\` directly.\nEOF", False),
+    ("cat > notes.md <<EOF\nEscaped: \\$(./build/zombies --smoke) is text\nEOF", False),
+    ("cat > notes.md <<EOF\nA \\\" quote, a \\\\ and `./build/zombies --mute`\nEOF", False),
     ('git commit -m "first line\n\n./build/zombies now needs --mute"', False),
     ("git commit -m \"$(cat <<'EOF'\nDon't run ./build/zombies; use zv\nEOF\n)\"", False),
     ("gh pr create --body-file - <<'EOF'\n## Summary\n./run.sh is blocked, see #15\nEOF", False),
