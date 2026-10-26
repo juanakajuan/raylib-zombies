@@ -322,6 +322,8 @@ def cmd_launch(args: argparse.Namespace) -> None:
     (run_dir / "shots").mkdir(parents=True, exist_ok=True)
     if not args.no_build:
         build(run_dir / "build.log")
+    # The game reads settings.cfg from its working directory. Volume 0 keeps the user's speakers silent.
+    (run_dir / "settings.cfg").write_text("volume=0\n")
     child = run_dir / "child.sh"
     # gamescope picks a free display; the child records it and its own PID, then becomes the game.
     child.write_text(
