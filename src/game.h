@@ -14,6 +14,7 @@
 #define START_POINTS 500
 #define PLAYER_BASE_HEALTH 100.0f
 #define PERK_MAX_HEALTH 250.0f
+#define QUICK_HANDS_RELOAD_SCALE 0.5f
 #define PLAYER_EYE_HEIGHT 1.7f
 #define PLAYER_RADIUS 0.4f
 #define ZOMBIE_RADIUS 0.4f
@@ -73,12 +74,26 @@ typedef struct WeaponSlot {
     int reserve;
 } WeaponSlot;
 
+typedef enum PerkId {
+    PERK_VITALITY,
+    PERK_QUICK_HANDS,
+    PERK_COUNT,
+} PerkId;
+
+typedef struct PerkDef {
+    const char *name;
+    int cost;
+} PerkDef;
+
+extern const PerkDef PERKS[PERK_COUNT];
+
 typedef struct Player {
     Vector3 pos; /* feet position, y is always 0 */
     float yaw; /* 0 looks down -Z, positive turns toward +X */
     float pitch;
     float health;
     float max_health;
+    uint8_t perks; /* bit PerkId is set once that perk is bought */
     float time_since_damage;
     int points;
     WeaponSlot slots[MAX_SLOTS];
@@ -141,7 +156,7 @@ typedef struct Interactable {
     BoundingBox box;
     bool solid;
     float radius;
-    int payload; /* weapon id, door index, or perk cost */
+    int payload; /* weapon id, door index, or PerkId */
 } Interactable;
 
 typedef struct InteractionInfo {
@@ -207,7 +222,8 @@ bool GameInteractableVisible(const GameState *g, int index, Vector3 eye);
 int GameAliveZombies(const GameState *g);
 int GameNearestInteractable(const GameState *g);
 InteractionInfo GameDescribeInteractable(const GameState *g, int index);
-bool PlayerHasPerk(const Player *p);
+bool PlayerHasPerk(const Player *p, PerkId id);
+float ReloadDuration(const Player *p, WeaponId id);
 Vector3 PlayerEye(const Player *p);
 Vector3 PlayerForward(const Player *p);
 BoundingBox ZombieBodyBox(const Zombie *z);

@@ -1,7 +1,7 @@
 # raylib-zombies
 
 A small first-person zombie survival proof of concept in C11 with raylib 5.5.
-Survive rounds of zombies, earn points by shooting them, and spend points on a door, wall-buy weapons and a perk.
+Survive rounds of zombies, earn points by shooting them, and spend points on a door, wall-buy weapons and perks.
 
 ## Build and run
 
@@ -45,7 +45,7 @@ The pause menu lists volume (0 to 1), mouse sensitivity (0.2x to 3x) and field o
 - Hitscan shooting with headshots. Points: 10 per hit, 60 per kill, 100 per headshot kill.
 - Three weapons from a data table: M1911 pistol, MP5K (1000 points, automatic) and shotgun (1500 points, multi-pellet). You carry two.
 - A 750 point door that opens the back room and its zombie spawns.
-- A 2500 point perk that raises max health from 100 to 250.
+- Two perks: Vitality Brew (2500 points) raises max health from 100 to 250. Quick Hands (3000 points, back room) halves reload time.
 - Health regenerates after 3 seconds without damage. Dying shows the game over screen, and R restarts.
 - Sound effects for each weapon, reload, hits and kills, zombie growls and attacks, player damage, round start and end, and purchases (with a buzz when you lack the points).
 
