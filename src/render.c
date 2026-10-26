@@ -195,6 +195,33 @@ static void DrawTextShadow(const char *text, int x, int y, int size, Color color
     DrawText(text, x, y, size, color);
 }
 
+/* The HUD is laid out for a window UI_REFERENCE_HEIGHT pixels tall. It grows with the window at half the rate of
+ * the height, so a 4K screen gets 2x and not 3x. */
+#define UI_REFERENCE_HEIGHT 720.0f
+#define UI_SCALE_RATE 0.5f
+
+static float UiScale(void)
+{
+    return 1.0f + ((float)GetScreenHeight() / UI_REFERENCE_HEIGHT - 1.0f) * UI_SCALE_RATE;
+}
+
+static int UiHeight(void)
+{
+    return (int)((float)GetScreenHeight() / UiScale());
+}
+
+static int UiWidth(void)
+{
+    return (int)((float)GetScreenWidth() / UiScale());
+}
+
+Vector2 UiMousePosition(void)
+{
+    Vector2 mouse = GetMousePosition();
+    float scale = UiScale();
+    return (Vector2){mouse.x / scale, mouse.y / scale};
+}
+
 static void DrawTextCentered(const char *text, int center_x, int y, int size, Color color)
 {
     DrawTextShadow(text, center_x - MeasureText(text, size) / 2, y, size, color);
@@ -242,17 +269,21 @@ static void DrawInteractableLabels(const GameState *g, Camera3D camera)
         if (Vector3Length(offset) > LABEL_RANGE || Vector3DotProduct(offset, forward) <= 0.1f) continue;
         if (!GameInteractableVisible(g, i, camera.position)) continue;
         Vector2 screen = GetWorldToScreen(anchor, camera);
-        DrawTextCentered(TextFormat("%s [%d]", info.subject, info.cost), (int)screen.x, (int)screen.y, 20, (Color){255, 230, 150, 255});
+        float scale = UiScale();
+        DrawTextCentered(TextFormat("%s [%d]", info.subject, info.cost), (int)(screen.x / scale), (int)(screen.y / scale), 20, (Color){255, 230, 150, 255});
     }
 }
 
 static void DrawHud(const GameState *g, Camera3D camera)
 {
     const Player *p = &g->player;
-    int width = GetScreenWidth(), height = GetScreenHeight();
+    int width = UiWidth(), height = UiHeight();
     const Color blood = {200, 24, 24, 255};
 
     bool playing = g->phase != PHASE_GAME_OVER;
+
+    rlPushMatrix();
+    rlScalef(UiScale(), UiScale(), 1.0f);
 
     DrawVignette(p, width, height);
     if (playing) {
@@ -304,6 +335,7 @@ static void DrawHud(const GameState *g, Camera3D camera)
         DrawTextCentered(TextFormat("Kills: %d", g->kills), width / 2, height / 4 + 184, 28, (Color){255, 255, 255, 200});
         if (g->phase_timer >= RESTART_DELAY) DrawTextCentered("Press R to restart", width / 2, height / 4 + 250, 32, (Color){255, 230, 120, 255});
     }
+    rlPopMatrix();
 }
 
 void GameDraw(const GameState *g, float fov_degrees)
@@ -335,20 +367,22 @@ void GameDraw(const GameState *g, float fov_degrees)
 
 Rectangle PauseRowBounds(int row)
 {
-    int width = GetScreenWidth(), height = GetScreenHeight();
+    int width = UiWidth(), height = UiHeight();
     return (Rectangle){(float)(width / 2 - 260), (float)(height / 3 + 130 + row * PAUSE_ROW_HEIGHT), 620.0f, (float)PAUSE_ROW_HEIGHT};
 }
 
 Rectangle PauseBarBounds(int row)
 {
     Rectangle r = PauseRowBounds(row);
-    return (Rectangle){(float)(GetScreenWidth() / 2 - 20), r.y + 6.0f, (float)PAUSE_BAR_WIDTH, 16.0f};
+    return (Rectangle){(float)(UiWidth() / 2 - 20), r.y + 6.0f, (float)PAUSE_BAR_WIDTH, 16.0f};
 }
 
-void DrawPauseOverlay(const Settings *settings, int selected)
+void DrawPauseOverlay(const Settings *settings, int selected, bool fullscreen)
 {
     const int font_size = 28;
-    int width = GetScreenWidth(), height = GetScreenHeight();
+    int width = UiWidth(), height = UiHeight();
+    rlPushMatrix();
+    rlScalef(UiScale(), UiScale(), 1.0f);
     DrawRectangle(0, 0, width, height, (Color){0, 0, 0, 150});
     DrawTextCentered("PAUSED", width / 2, height / 3, 110, WHITE);
 
@@ -367,6 +401,13 @@ void DrawPauseOverlay(const Settings *settings, int selected)
                        font_size, color);
     }
 
+    Rectangle display_row = PauseRowBounds(PAUSE_ROW_DISPLAY);
+    Color display_color = selected == PAUSE_ROW_DISPLAY ? (Color){255, 230, 120, 255} : (Color){255, 255, 255, 190};
+    DrawTextShadow("window mode", (int)display_row.x, (int)display_row.y, font_size, display_color);
+    DrawTextShadow(TextFormat(selected == PAUSE_ROW_DISPLAY ? "< %s >" : "%s", fullscreen ? "fullscreen" : "windowed"),
+                   (int)PauseBarBounds(PAUSE_ROW_DISPLAY).x, (int)display_row.y, font_size, display_color);
+
     DrawTextCentered("Mouse or Up/Down/Left/Right to adjust, Esc resume, F11 fullscreen, Q quit", width / 2,
-                     (int)PauseRowBounds(SETTING_COUNT).y + 30, 24, (Color){255, 230, 120, 255});
+                     (int)PauseRowBounds(PAUSE_ROW_COUNT).y + 30, 24, (Color){255, 230, 120, 255});
+    rlPopMatrix();
 }
