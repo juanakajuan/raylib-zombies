@@ -377,7 +377,7 @@ Rectangle PauseBarBounds(int row)
     return (Rectangle){(float)(UiWidth() / 2 - 20), r.y + 6.0f, (float)PAUSE_BAR_WIDTH, 16.0f};
 }
 
-void DrawPauseOverlay(const Settings *settings, int selected)
+void DrawPauseOverlay(const Settings *settings, int selected, bool fullscreen)
 {
     const int font_size = 28;
     int width = UiWidth(), height = UiHeight();
@@ -401,7 +401,13 @@ void DrawPauseOverlay(const Settings *settings, int selected)
                        font_size, color);
     }
 
+    Rectangle display_row = PauseRowBounds(PAUSE_ROW_DISPLAY);
+    Color display_color = selected == PAUSE_ROW_DISPLAY ? (Color){255, 230, 120, 255} : (Color){255, 255, 255, 190};
+    DrawTextShadow("window mode", (int)display_row.x, (int)display_row.y, font_size, display_color);
+    DrawTextShadow(TextFormat(selected == PAUSE_ROW_DISPLAY ? "< %s >" : "%s", fullscreen ? "fullscreen" : "windowed"),
+                   (int)PauseBarBounds(PAUSE_ROW_DISPLAY).x, (int)display_row.y, font_size, display_color);
+
     DrawTextCentered("Mouse or Up/Down/Left/Right to adjust, Esc resume, F11 fullscreen, Q quit", width / 2,
-                     (int)PauseRowBounds(SETTING_COUNT).y + 30, 24, (Color){255, 230, 120, 255});
+                     (int)PauseRowBounds(PAUSE_ROW_COUNT).y + 30, 24, (Color){255, 230, 120, 255});
     rlPopMatrix();
 }

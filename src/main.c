@@ -19,6 +19,7 @@
 #define SIM_DT (1.0f / 240.0f)
 #define MAX_FRAME_TIME 0.1f
 #define LOOK_SETTLE_FRAMES 2
+#define WINDOWED_LAYOUT_DELAY_FRAMES 3
 
 #define SMOKE_SEED 20240607u
 #define SMOKE_FRAME_DT (1.0f / 60.0f)
@@ -93,25 +94,43 @@ static void AdvanceSim(GameState *g, SimClock *clock, const FrameInput *fresh, f
 }
 
 /* GLFW lists the primary monitor first. */
-static void SetDisplayMode(DisplayMode mode)
+static int windowed_layout_frames;
+
+static void ApplyWindowedLayout(void)
 {
     Vector2 monitor = GetMonitorPosition(0);
+    SetWindowSize(WINDOW_WIDTH, WINDOW_HEIGHT);
+    SetWindowPosition((int)monitor.x + (GetMonitorWidth(0) - WINDOW_WIDTH) / 2,
+                      (int)monitor.y + (GetMonitorHeight(0) - WINDOW_HEIGHT) / 2);
+}
+
+static void SetDisplayMode(DisplayMode mode)
+{
     int monitor_width = GetMonitorWidth(0);
     int monitor_height = GetMonitorHeight(0);
     switch (mode) {
     case DISPLAY_FULLSCREEN:
+        windowed_layout_frames = 0;
         if (IsWindowFullscreen()) return;
         SetWindowSize(monitor_width, monitor_height);
         ToggleFullscreen();
         SetWindowMonitor(0);
         return;
     case DISPLAY_WINDOWED:
-        if (IsWindowFullscreen()) ToggleFullscreen();
-        SetWindowSize(WINDOW_WIDTH, WINDOW_HEIGHT);
-        SetWindowPosition((int)monitor.x + (monitor_width - WINDOW_WIDTH) / 2,
-                          (int)monitor.y + (monitor_height - WINDOW_HEIGHT) / 2);
+        if (IsWindowFullscreen()) {
+            ToggleFullscreen();
+            windowed_layout_frames = WINDOWED_LAYOUT_DELAY_FRAMES;
+        } else {
+            ApplyWindowedLayout();
+        }
         return;
     }
+}
+
+/* The compositor ignores a resize or move sent in the same frame that leaves fullscreen, so the layout waits. */
+static void UpdateWindowedLayout(void)
+{
+    if (windowed_layout_frames > 0 && --windowed_layout_frames == 0) ApplyWindowedLayout();
 }
 
 static bool DisplayTogglePressed(void)
@@ -128,6 +147,7 @@ static bool MenuKeyPressed(int key)
 typedef struct SettingsMenu {
     int selected;
     int dragging; /* row whose bar the held mouse button grabbed, or -1 */
+    bool toggle_display; /* set for one update when the window mode row asks for a change */
 } SettingsMenu;
 
 /* Returns true when a setting changed. A drag keeps its row until the button is released. */
@@ -135,17 +155,20 @@ static bool UpdateSettingsMenu(Settings *settings, SettingsMenu *menu)
 {
     Vector2 mouse = UiMousePosition();
     bool changed = false;
-    menu->selected = (menu->selected + SETTING_COUNT + MenuKeyPressed(KEY_DOWN) - MenuKeyPressed(KEY_UP)) % SETTING_COUNT;
+    menu->toggle_display = false;
+    menu->selected = (menu->selected + PAUSE_ROW_COUNT + MenuKeyPressed(KEY_DOWN) - MenuKeyPressed(KEY_UP)) % PAUSE_ROW_COUNT;
     if (GetMouseDelta().x != 0.0f || GetMouseDelta().y != 0.0f) {
-        for (int i = 0; i < SETTING_COUNT; i++) {
+        for (int i = 0; i < PAUSE_ROW_COUNT; i++) {
             if (CheckCollisionPointRec(mouse, PauseRowBounds(i))) menu->selected = i;
         }
     }
     if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT)) menu->dragging = -1;
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-        for (int i = 0; i < SETTING_COUNT; i++) {
-            if (CheckCollisionPointRec(mouse, PauseRowBounds(i))) menu->selected = i;
-            if (CheckCollisionPointRec(mouse, PauseBarBounds(i))) menu->dragging = i;
+        for (int i = 0; i < PAUSE_ROW_COUNT; i++) {
+            if (!CheckCollisionPointRec(mouse, PauseRowBounds(i))) continue;
+            menu->selected = i;
+            if (i == PAUSE_ROW_DISPLAY) menu->toggle_display = true;
+            else if (CheckCollisionPointRec(mouse, PauseBarBounds(i))) menu->dragging = i;
         }
     }
     if (menu->dragging >= 0) {
@@ -155,7 +178,9 @@ static bool UpdateSettingsMenu(Settings *settings, SettingsMenu *menu)
         changed = true;
     }
     int direction = MenuKeyPressed(KEY_RIGHT) - MenuKeyPressed(KEY_LEFT);
-    if (direction != 0) {
+    if (direction != 0 && menu->selected == PAUSE_ROW_DISPLAY) {
+        menu->toggle_display = true;
+    } else if (direction != 0) {
         SettingsAdjust(settings, (SettingId)menu->selected, direction);
         changed = true;
     }
@@ -180,6 +205,7 @@ static int RunGame(void)
     DisableCursor();
 
     while (!quit && !WindowShouldClose()) {
+        UpdateWindowedLayout();
         if (DisplayTogglePressed()) {
             SetDisplayMode(IsWindowFullscreen() ? DISPLAY_WINDOWED : DISPLAY_FULLSCREEN);
             discard_look_frames = LOOK_SETTLE_FRAMES;
@@ -201,6 +227,11 @@ static int RunGame(void)
             settings_dirty = true;
             SetMasterVolume(settings.volume);
         }
+        if (menu.toggle_display) {
+            SetDisplayMode(IsWindowFullscreen() ? DISPLAY_WINDOWED : DISPLAY_FULLSCREEN);
+            discard_look_frames = LOOK_SETTLE_FRAMES;
+            menu.toggle_display = false;
+        }
         if (!paused) {
             FrameInput in = ReadInput(settings.sensitivity);
             if (discard_look_frames > 0) {
@@ -211,7 +242,7 @@ static int RunGame(void)
         }
         BeginDrawing();
         GameDraw(&game, settings.fov);
-        if (paused) DrawPauseOverlay(&settings, menu.selected);
+        if (paused) DrawPauseOverlay(&settings, menu.selected, IsWindowFullscreen());
         EndDrawing();
     }
     if (settings_dirty) SettingsSave(&settings);
