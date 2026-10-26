@@ -281,7 +281,9 @@ static void DrawDamageNumbers(const GameState *g, Camera3D camera)
         Vector2 screen = GetWorldToScreen(anchor, camera);
         Color color = n->kill ? DAMAGE_KILL : n->headshot ? DAMAGE_HEADSHOT : DAMAGE_BODY;
         color.a = (unsigned char)(255.0f * Clamp((1.0f - age) * 2.0f, 0.0f, 1.0f));
-        DrawTextCentered(TextFormat("%d", (int)ceilf(n->amount)), (int)(screen.x / scale), (int)(screen.y / scale), n->headshot ? 26 : 22, color);
+        /* Consecutive hits land in different slots, so a per-slot nudge keeps rapid hits on one spot readable. */
+        int nudge = (i * 7 % 5 - 2) * 12;
+        DrawTextCentered(TextFormat("%d", (int)ceilf(n->amount)), (int)(screen.x / scale) + nudge, (int)(screen.y / scale), n->headshot ? 26 : 22, color);
     }
 }
 
