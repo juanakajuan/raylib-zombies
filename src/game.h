@@ -38,7 +38,8 @@ typedef struct FrameInput {
     bool fire_pressed;
     bool reload_pressed;
     bool interact_pressed;
-    bool swap_pressed;
+    int select_slot;  /* 1-based slot picked by a number key, 0 for none */
+    int cycle_steps;  /* mouse wheel: positive selects the next weapon, negative the previous */
     bool sprint_held;
     bool crouch_held;
     bool jump_pressed;

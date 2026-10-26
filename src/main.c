@@ -51,7 +51,11 @@ static FrameInput ReadInput(float sensitivity)
     in.fire_pressed = IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
     in.reload_pressed = IsKeyPressed(KEY_R);
     in.interact_pressed = IsKeyPressed(KEY_E);
-    in.swap_pressed = IsKeyPressed(KEY_Q);
+    for (int i = 0; i < MAX_SLOTS; i++) {
+        if (IsKeyPressed(KEY_ONE + i)) in.select_slot = i + 1;
+    }
+    float wheel = GetMouseWheelMove();
+    in.cycle_steps = (wheel < 0.0f) - (wheel > 0.0f);
     in.sprint_held = IsKeyDown(KEY_LEFT_SHIFT);
     in.crouch_held = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_C);
     in.jump_pressed = IsKeyPressed(KEY_SPACE);
@@ -70,7 +74,8 @@ static void MergeInput(FrameInput *pending, const FrameInput *fresh)
     pending->fire_pressed = pending->fire_pressed || fresh->fire_pressed;
     pending->reload_pressed = pending->reload_pressed || fresh->reload_pressed;
     pending->interact_pressed = pending->interact_pressed || fresh->interact_pressed;
-    pending->swap_pressed = pending->swap_pressed || fresh->swap_pressed;
+    if (fresh->select_slot != 0) pending->select_slot = fresh->select_slot;
+    pending->cycle_steps += fresh->cycle_steps;
     pending->jump_pressed = pending->jump_pressed || fresh->jump_pressed;
     pending->restart_pressed = pending->restart_pressed || fresh->restart_pressed;
 }
@@ -81,7 +86,8 @@ static void ClearOneShots(FrameInput *in)
     in->fire_pressed = false;
     in->reload_pressed = false;
     in->interact_pressed = false;
-    in->swap_pressed = false;
+    in->select_slot = 0;
+    in->cycle_steps = 0;
     in->jump_pressed = false;
     in->restart_pressed = false;
 }

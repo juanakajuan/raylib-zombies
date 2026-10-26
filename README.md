@@ -29,7 +29,7 @@ On Linux it also needs the X11 and OpenGL development headers.
 | Left mouse | Fire |
 | R | Reload (restart on the game over screen) |
 | E | Buy or interact |
-| Q | Swap weapon |
+| 1, 2 or mouse wheel | Select weapon |
 | Shift | Sprint |
 | Space | Jump |
 | Ctrl / C | Crouch (hold) |

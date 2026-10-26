@@ -165,8 +165,8 @@ class Session:
             self._xtest.fake_input(self.display, self._X.KeyRelease, self.keycode(name))
         self.display.sync()
 
-    def button(self, down: bool) -> None:
-        self._xtest.fake_input(self.display, self._X.ButtonPress if down else self._X.ButtonRelease, 1)
+    def button(self, down: bool, number: int = 1) -> None:
+        self._xtest.fake_input(self.display, self._X.ButtonPress if down else self._X.ButtonRelease, number)
         self.display.sync()
 
     def move(self, dx: int, dy: int) -> None:
@@ -471,6 +471,17 @@ def cmd_click(args: argparse.Namespace) -> None:
     log_action(session.run_dir, f"click count={args.count} hold={args.hold} interval={args.interval}")
 
 
+def cmd_wheel(args: argparse.Namespace) -> None:
+    session = session_for(args.run)
+    # X reports the wheel as button 4 (up) and button 5 (down).
+    number = 4 if args.direction == "up" else 5
+    for _ in range(args.count):
+        session.button(True, number)
+        session.button(False, number)
+        time.sleep(args.interval)
+    log_action(session.run_dir, f"wheel {args.direction} count={args.count}")
+
+
 def cmd_look(args: argparse.Namespace) -> None:
     session = session_for(args.run)
     dx = round(math.radians(args.yaw) / MOUSE_SENSITIVITY)
@@ -629,6 +640,10 @@ def main() -> None:
     p.add_argument("--count", type=int, default=1)
     p.add_argument("--hold", type=float, default=0.05, help="seconds held; hold long for the automatic MP5K")
     p.add_argument("--interval", type=float, default=0.35, help="seconds between clicks (M1911 fires every 0.28s)")
+    p = add("wheel", cmd_wheel, "scroll the mouse wheel (selects the next or previous weapon)")
+    p.add_argument("direction", choices=["up", "down"])
+    p.add_argument("--count", type=int, default=1)
+    p.add_argument("--interval", type=float, default=0.3, help="seconds after each notch")
     p = add("look", cmd_look, "turn the view by degrees through relative mouse motion")
     p.add_argument("yaw", type=float, help="degrees, positive turns right")
     p.add_argument("pitch", type=float, nargs="?", default=0.0, help="degrees, positive looks up")

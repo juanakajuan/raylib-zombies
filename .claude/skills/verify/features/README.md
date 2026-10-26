@@ -40,7 +40,7 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 
 - [Combat and rounds](./combat-and-rounds.md) covers firing, hits and kills for points, reload, the round counter and the intermission.
 - [Open the door](./door.md) covers buying the 750 point door and entering the back room.
-- [Wall-buy weapons](./wall-buys.md) covers buying the MP5K and shotgun, carrying two weapons, swapping with Q and refilling ammo.
+- [Wall-buy weapons](./wall-buys.md) covers buying the MP5K and shotgun, carrying two weapons, switching with the number keys or mouse wheel and refilling ammo.
 - [Vitality Brew perk](./perk.md) covers buying the 2500 point perk that raises max health to 250.
 - [Pause and display mode](./pause-and-display.md) covers Esc pause, quit from pause, F11 and Alt+Enter, and the `--fullscreen` and `--windowed` flags.
 - [Game over and restart](./game-over-and-restart.md) covers death, the game over screen and restart with R.
