@@ -8,6 +8,8 @@ The player shoots zombies with the left mouse button and earns points: 10 per hi
 - `combat-fire` takes one round from the magazine per click with the M1911 (`8 / 96` → `7 / 96`).
 - `combat-reload` refills the magazine from the reserve with R and shows `RELOADING` for 1.4 s.
 - `combat-points` adds points when a zombie is hit or killed, and lowers `Zombies left`.
+- `combat-health-bars` shows a thin red bar above each living zombie that shrinks as it takes damage, and hides it behind walls. The fill is red so `find_zombies` still sees only the green skin.
+- `combat-damage-numbers` floats a small white number up from the hit point for 0.8 s (yellow and larger for a headshot, orange for a kill). Shotgun pellets on one zombie merge into one number.
 - `combat-round-advance` shows `ROUND 2` and a new countdown after the last zombie of a round dies.
 - `combat-damage-regen` lowers the health bar when a zombie hits the player, and refills it 3 s after the last hit.
 
