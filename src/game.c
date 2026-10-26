@@ -60,6 +60,21 @@ const PerkDef PERKS[PERK_COUNT] = {
     [PERK_QUICK_HANDS] = {"Quick Hands", 3000},
 };
 
+const DebugCommand DEBUG_COMMANDS[] = {
+    {"+5000 points", DEBUG_POINTS, 5000},
+    {"Give M1911", DEBUG_WEAPON, WEAPON_PISTOL},
+    {"Give MP5K", DEBUG_WEAPON, WEAPON_SMG},
+    {"Give Shotgun", DEBUG_WEAPON, WEAPON_SHOTGUN},
+    {"Give Vitality Brew", DEBUG_PERK, PERK_VITALITY},
+    {"Give Quick Hands", DEBUG_PERK, PERK_QUICK_HANDS},
+    {"Refill ammo", DEBUG_REFILL_AMMO, 0},
+    {"Full health", DEBUG_HEAL, 0},
+    {"God mode", DEBUG_GOD_MODE, 0},
+    {"Open all doors", DEBUG_OPEN_DOORS, 0},
+    {"Skip round", DEBUG_SKIP_ROUND, 0},
+};
+const int DEBUG_COMMAND_COUNT = (int)(sizeof DEBUG_COMMANDS / sizeof DEBUG_COMMANDS[0]);
+
 const BoundingBox LEVEL_WALLS[] = {
     {{-10.6f, 0.0f, -16.6f}, {-10.0f, WALL_HEIGHT, 14.6f}},
     {{10.0f, 0.0f, -16.6f}, {10.6f, WALL_HEIGHT, 14.6f}},
@@ -569,7 +584,7 @@ static void EnterPhase(GameState *g, GamePhase phase)
 static void DamagePlayer(GameState *g, float amount)
 {
     Player *p = &g->player;
-    if (g->phase == PHASE_GAME_OVER) return;
+    if (g->phase == PHASE_GAME_OVER || g->god_mode) return;
     p->health -= amount;
     p->time_since_damage = 0.0f;
     p->damage_flash = DAMAGE_FLASH_TIME;
@@ -756,6 +771,15 @@ InteractionInfo GameDescribeInteractable(const GameState *g, int index)
     return info;
 }
 
+static void GrantPerk(GameState *g, PerkId id)
+{
+    g->player.perks |= (uint8_t)(1u << id);
+    if (id == PERK_VITALITY) {
+        g->player.max_health = PERK_MAX_HEALTH;
+        g->player.health = PERK_MAX_HEALTH;
+    }
+}
+
 static void ApplyInteraction(GameState *g, const Interactable *it)
 {
     switch (it->kind) {
@@ -765,15 +789,60 @@ static void ApplyInteraction(GameState *g, const Interactable *it)
     case INTERACT_DOOR:
         g->zone_open[LEVEL_DOORS[it->payload].opens_zone] = true;
         break;
-    case INTERACT_PERK: {
-        PerkId id = (PerkId)it->payload;
-        g->player.perks |= (uint8_t)(1u << id);
-        if (id == PERK_VITALITY) {
-            g->player.max_health = PERK_MAX_HEALTH;
-            g->player.health = PERK_MAX_HEALTH;
-        }
+    case INTERACT_PERK:
+        GrantPerk(g, (PerkId)it->payload);
         break;
     }
+}
+
+static void SkipRound(GameState *g)
+{
+    if (g->phase == PHASE_INTERMISSION) {
+        g->phase_timer = INTERMISSION_TIME;
+        return;
+    }
+    g->zombies_left_to_spawn = 0;
+    for (int i = 0; i < MAX_ZOMBIES; i++) {
+        Zombie *z = &g->zombies[i];
+        if (z->state != ZOMBIE_CHASE && z->state != ZOMBIE_ATTACK) continue;
+        z->state = ZOMBIE_DYING;
+        z->dying_timer = ZOMBIE_DYING_TIME;
+    }
+}
+
+void GameDebugApply(GameState *g, const DebugCommand *cmd)
+{
+    Player *p = &g->player;
+    if (g->phase == PHASE_GAME_OVER) return;
+    switch (cmd->kind) {
+    case DEBUG_POINTS:
+        p->points += cmd->arg;
+        break;
+    case DEBUG_WEAPON:
+        GiveWeapon(p, (WeaponId)cmd->arg);
+        break;
+    case DEBUG_PERK:
+        GrantPerk(g, (PerkId)cmd->arg);
+        break;
+    case DEBUG_REFILL_AMMO:
+        for (int i = 0; i < p->slot_count; i++) {
+            p->slots[i].mag = WEAPONS[p->slots[i].id].mag_size;
+            p->slots[i].reserve = WEAPONS[p->slots[i].id].reserve_max;
+        }
+        p->reload_timer = 0.0f;
+        break;
+    case DEBUG_HEAL:
+        p->health = p->max_health;
+        break;
+    case DEBUG_GOD_MODE:
+        g->god_mode = !g->god_mode;
+        break;
+    case DEBUG_OPEN_DOORS:
+        for (int i = 0; i < ZONE_COUNT; i++) g->zone_open[i] = true;
+        break;
+    case DEBUG_SKIP_ROUND:
+        SkipRound(g);
+        break;
     }
 }
 

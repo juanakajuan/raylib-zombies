@@ -44,5 +44,6 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 - [Vitality Brew perk](./perk.md) covers buying the 2500 point perk that raises max health to 250.
 - [Pause and display mode](./pause-and-display.md) covers Esc pause, quit from pause, F11 and Alt+Enter, and the `--fullscreen` and `--windowed` flags.
 - [Game over and restart](./game-over-and-restart.md) covers death, the game over screen and restart with R.
+- [Debug tools](./debug-tools.md) covers the `--debug` flag and the F1 cheat menu for points, weapons, perks, god mode and round skipping.
 - [Jump, crouch and the low slab](./crouch.md) covers Space jump, Ctrl or C crouch, and the low slab in the front room that only a crouching player passes under.
 - [Smoke mode](./smoke-mode.md) covers the `--smoke` scripted run that writes three screenshots.

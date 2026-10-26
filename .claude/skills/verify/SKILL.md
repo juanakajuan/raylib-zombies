@@ -92,6 +92,7 @@ Read screenshots with the Read tool. There is no OCR on this machine, so read HU
 Proof standards:
 
 - Drive the real user path: keys, mouse, and points earned by shooting. Do not add cheats, change `START_POINTS`, or use `--smoke` as proof of a user feature.
+- The `--debug` menu is a cheat and is not proof of a user feature. Use it only to reach a state (points, perks) quickly when the feature under test is not the purchase itself.
 - Capture before and after: a shot of the state before the action, the action in `actions.log`, and a shot of the result. Number shots in order (`01-...`, `02-...`).
 - Prove the side effect, not only the HUD: after a purchase, show the points drop by the cost and show the effect (door gone and player standing on the blue back-room floor, weapon name and ammo changed, health bar reads 250).
 - Name the run in your report and list the shot files.

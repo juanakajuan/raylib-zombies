@@ -1474,6 +1474,126 @@ static void TestSettingsFormatRoundTrip(void)
     CHECK(SettingsFormat(&original, NULL, 0) == length, "a NULL buffer only measures");
 }
 
+static const DebugCommand *FindDebugCommand(DebugKind kind, int arg)
+{
+    for (int i = 0; i < DEBUG_COMMAND_COUNT; i++) {
+        if (DEBUG_COMMANDS[i].kind == kind && DEBUG_COMMANDS[i].arg == arg) return &DEBUG_COMMANDS[i];
+    }
+    return NULL;
+}
+
+static void DebugApply(GameState *g, DebugKind kind, int arg)
+{
+    const DebugCommand *cmd = FindDebugCommand(kind, arg);
+    CHECK(cmd != NULL, "no debug command for kind=%d arg=%d", (int)kind, arg);
+    if (cmd != NULL) GameDebugApply(g, cmd);
+}
+
+static void TestDebugTableCoversEveryWeaponAndPerk(void)
+{
+    for (int i = 0; i < WEAPON_COUNT; i++) {
+        const DebugCommand *cmd = FindDebugCommand(DEBUG_WEAPON, i);
+        CHECK(cmd != NULL, "weapon %d has no debug row", i);
+        if (cmd != NULL) CHECK(strstr(cmd->label, WEAPONS[i].name) != NULL, "label \"%s\" misses \"%s\"", cmd->label, WEAPONS[i].name);
+    }
+    for (int i = 0; i < PERK_COUNT; i++) {
+        const DebugCommand *cmd = FindDebugCommand(DEBUG_PERK, i);
+        CHECK(cmd != NULL, "perk %d has no debug row", i);
+        if (cmd != NULL) CHECK(strstr(cmd->label, PERKS[i].name) != NULL, "label \"%s\" misses \"%s\"", cmd->label, PERKS[i].name);
+    }
+}
+
+static void TestDebugPointsWeaponsAndPerks(void)
+{
+    GameState g = NewActiveGame();
+    DebugApply(&g, DEBUG_POINTS, 5000);
+    CHECK(g.player.points == START_POINTS + 5000, "points=%d", g.player.points);
+
+    DebugApply(&g, DEBUG_WEAPON, WEAPON_SMG);
+    DebugApply(&g, DEBUG_WEAPON, WEAPON_SHOTGUN);
+    CHECK(g.player.slot_count == 2, "slot_count=%d", g.player.slot_count);
+    CHECK(g.player.slots[g.player.active].id == WEAPON_SHOTGUN, "active weapon=%d", (int)g.player.slots[g.player.active].id);
+    CHECK(g.player.slots[g.player.active].mag == WEAPONS[WEAPON_SHOTGUN].mag_size, "mag=%d", g.player.slots[g.player.active].mag);
+    CHECK(g.player.slots[g.player.active].reserve == WEAPONS[WEAPON_SHOTGUN].reserve_max, "reserve=%d", g.player.slots[g.player.active].reserve);
+
+    DebugApply(&g, DEBUG_PERK, PERK_VITALITY);
+    CHECK(PlayerHasPerk(&g.player, PERK_VITALITY), "Vitality must be owned");
+    CHECK(g.player.max_health == PERK_MAX_HEALTH && g.player.health == PERK_MAX_HEALTH, "health=%.0f/%.0f",
+          (double)g.player.health, (double)g.player.max_health);
+
+    float base_reload = ReloadDuration(&g.player, WEAPON_SMG);
+    DebugApply(&g, DEBUG_PERK, PERK_QUICK_HANDS);
+    CHECK(ReloadDuration(&g.player, WEAPON_SMG) == base_reload * QUICK_HANDS_RELOAD_SCALE, "reload=%.2f base=%.2f",
+          (double)ReloadDuration(&g.player, WEAPON_SMG), (double)base_reload);
+}
+
+static void TestDebugRefillAndHeal(void)
+{
+    GameState g = NewActiveGame();
+    DebugApply(&g, DEBUG_WEAPON, WEAPON_SMG);
+    for (int i = 0; i < g.player.slot_count; i++) {
+        g.player.slots[i].mag = 1;
+        g.player.slots[i].reserve = 2;
+    }
+    g.player.reload_timer = 1.0f;
+    g.player.health = 10.0f;
+    DebugApply(&g, DEBUG_REFILL_AMMO, 0);
+    DebugApply(&g, DEBUG_HEAL, 0);
+    for (int i = 0; i < g.player.slot_count; i++) {
+        const WeaponDef *def = &WEAPONS[g.player.slots[i].id];
+        CHECK(g.player.slots[i].mag == def->mag_size && g.player.slots[i].reserve == def->reserve_max, "slot %d mag=%d reserve=%d",
+              i, g.player.slots[i].mag, g.player.slots[i].reserve);
+    }
+    CHECK(g.player.reload_timer == 0.0f, "reload_timer=%.2f", (double)g.player.reload_timer);
+    CHECK(g.player.health == g.player.max_health, "health=%.0f", (double)g.player.health);
+}
+
+static void TestDebugGodMode(void)
+{
+    GameState g = NewActiveGame();
+    FrameInput idle = {0};
+    Zombie *z = PlaceZombie(&g, (Vector3){0.0f, 0.0f, 7.0f}, 150.0f);
+    z->attack_timer = 0.0f;
+
+    DebugApply(&g, DEBUG_GOD_MODE, 0);
+    for (int i = 0; i < 60 * 10; i++) GameUpdate(&g, &idle, DT);
+    CHECK(g.player.health == PLAYER_BASE_HEALTH, "god mode must block damage, health=%.1f", (double)g.player.health);
+
+    DebugApply(&g, DEBUG_GOD_MODE, 0);
+    for (int i = 0; i < 60 * 10 && g.player.health == PLAYER_BASE_HEALTH; i++) GameUpdate(&g, &idle, DT);
+    CHECK(g.player.health < PLAYER_BASE_HEALTH, "damage must return after toggling off, health=%.1f", (double)g.player.health);
+}
+
+static void TestDebugOpenDoors(void)
+{
+    GameState g = NewActiveGame();
+    CHECK(!g.zone_open[1], "the back room starts closed");
+    DebugApply(&g, DEBUG_OPEN_DOORS, 0);
+    CHECK(g.zone_open[1], "the back room must open");
+}
+
+static void TestDebugSkipRound(void)
+{
+    GameState g = NewActiveGame();
+    FrameInput idle = {0};
+    g.round_number = 3;
+    g.zombies_left_to_spawn = 5;
+    PlaceZombie(&g, (Vector3){0.0f, 0.0f, 7.0f}, 150.0f);
+    PlaceZombie(&g, (Vector3){3.0f, 0.0f, 9.0f}, 150.0f);
+    int points = g.player.points;
+    int kills = g.kills;
+
+    DebugApply(&g, DEBUG_SKIP_ROUND, 0);
+    for (float t = 0.0f; t < ZOMBIE_DYING_TIME + 0.5f; t += DT) GameUpdate(&g, &idle, DT);
+    CHECK(g.round_number == 4, "round_number=%d", g.round_number);
+    CHECK(g.phase == PHASE_INTERMISSION, "phase=%d", (int)g.phase);
+    CHECK(g.kills == kills && g.player.points == points, "kills=%d points=%d", g.kills, g.player.points);
+
+    DebugApply(&g, DEBUG_SKIP_ROUND, 0);
+    GameUpdate(&g, &idle, DT);
+    CHECK(g.phase == PHASE_ROUND_ACTIVE, "skipping an intermission must start the round, phase=%d", (int)g.phase);
+}
+
 int main(void)
 {
     TestInit();
@@ -1516,6 +1636,12 @@ int main(void)
     TestZombieAndPlayerDamageEvents();
     TestRoundEvents();
     TestPurchaseEvents();
+    TestDebugTableCoversEveryWeaponAndPerk();
+    TestDebugPointsWeaponsAndPerks();
+    TestDebugRefillAndHeal();
+    TestDebugGodMode();
+    TestDebugOpenDoors();
+    TestDebugSkipRound();
     TestSettingsDefaultsAndAdjust();
     TestSettingsSetRatio();
     TestSettingsParse();

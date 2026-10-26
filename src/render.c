@@ -327,6 +327,7 @@ static void DrawHud(const GameState *g, Camera3D camera)
         DrawCrosshair(p, width, height);
     }
 
+    if (g->god_mode) DrawTextShadow("GOD MODE", width - 170, 20, 24, (Color){255, 230, 120, 255});
     DrawTextShadow(TextFormat("%d", g->round_number), 28, height - 130, 110, blood);
     DrawTextShadow(TextFormat("%d", p->points), 190, height - 78, 44, (Color){255, 230, 120, 255});
     DrawTextShadow("POINTS", 192, height - 100, 18, (Color){255, 255, 255, 190});
@@ -422,6 +423,89 @@ void GameDraw(const GameState *g, float fov_degrees)
     DrawHud(g, camera);
 }
 
+#define BLUR_DOWNSCALE 2
+#define BLUR_SPREAD 2.0f
+
+static const char BLUR_SHADER[] =
+    "#version 330\n"
+    "in vec2 fragTexCoord;\n"
+    "in vec4 fragColor;\n"
+    "uniform sampler2D texture0;\n"
+    "uniform vec4 colDiffuse;\n"
+    "uniform vec2 direction;\n"
+    "out vec4 finalColor;\n"
+    "const float weights[5] = float[](0.227027, 0.1945946, 0.1216216, 0.054054, 0.016216);\n"
+    "void main()\n"
+    "{\n"
+    "    vec3 sum = texture(texture0, fragTexCoord).rgb * weights[0];\n"
+    "    for (int i = 1; i < 5; i++) {\n"
+    "        vec2 offset = direction * float(i);\n"
+    "        sum += texture(texture0, fragTexCoord + offset).rgb * weights[i];\n"
+    "        sum += texture(texture0, fragTexCoord - offset).rgb * weights[i];\n"
+    "    }\n"
+    "    finalColor = vec4(sum, 1.0) * colDiffuse * fragColor;\n"
+    "}\n";
+
+typedef struct BlurTargets {
+    Shader shader;
+    int direction_loc;
+    RenderTexture2D scene;
+    RenderTexture2D half; /* holds the horizontal pass at reduced size */
+} BlurTargets;
+
+static RenderTexture2D LoadBlurTexture(int width, int height)
+{
+    RenderTexture2D target = LoadRenderTexture(width, height);
+    SetTextureFilter(target.texture, TEXTURE_FILTER_BILINEAR);
+    SetTextureWrap(target.texture, TEXTURE_WRAP_CLAMP);
+    return target;
+}
+
+/* Created on first use and again when the window size changes, so a fullscreen toggle in the pause menu stays sharp. */
+static BlurTargets *PrepareBlur(int width, int height)
+{
+    static BlurTargets blur;
+    if (blur.shader.id == 0) {
+        blur.shader = LoadShaderFromMemory(NULL, BLUR_SHADER);
+        blur.direction_loc = GetShaderLocation(blur.shader, "direction");
+    }
+    if (blur.scene.texture.width != width || blur.scene.texture.height != height) {
+        if (blur.scene.id != 0) {
+            UnloadRenderTexture(blur.scene);
+            UnloadRenderTexture(blur.half);
+        }
+        blur.scene = LoadBlurTexture(width, height);
+        blur.half = LoadBlurTexture(width / BLUR_DOWNSCALE, height / BLUR_DOWNSCALE);
+    }
+    return &blur;
+}
+
+static void DrawBlurPass(const BlurTargets *blur, Texture2D source, Vector2 direction, Rectangle dest)
+{
+    SetShaderValue(blur->shader, blur->direction_loc, &direction, SHADER_UNIFORM_VEC2);
+    BeginShaderMode(blur->shader);
+    /* Render textures are stored upside down, so the source rectangle flips them. */
+    DrawTexturePro(source, (Rectangle){0.0f, 0.0f, (float)source.width, -(float)source.height}, dest, Vector2Zero(), 0.0f, WHITE);
+    EndShaderMode();
+}
+
+void GameDrawBlurred(const GameState *g, float fov_degrees)
+{
+    int width = GetScreenWidth(), height = GetScreenHeight();
+    BlurTargets *blur = PrepareBlur(width, height);
+    Texture2D scene = blur->scene.texture, half = blur->half.texture;
+
+    BeginTextureMode(blur->scene);
+    GameDraw(g, fov_degrees);
+    EndTextureMode();
+
+    BeginTextureMode(blur->half);
+    DrawBlurPass(blur, scene, (Vector2){BLUR_SPREAD / (float)scene.width, 0.0f}, (Rectangle){0.0f, 0.0f, (float)half.width, (float)half.height});
+    EndTextureMode();
+
+    DrawBlurPass(blur, half, (Vector2){0.0f, BLUR_SPREAD / (float)half.height}, (Rectangle){0.0f, 0.0f, (float)width, (float)height});
+}
+
 #define PAUSE_ROW_HEIGHT 44
 #define PAUSE_BAR_WIDTH 200
 
@@ -469,5 +553,44 @@ void DrawPauseOverlay(const Settings *settings, int selected, bool fullscreen)
 
     DrawTextCentered("Mouse or Up/Down/Left/Right to adjust, Esc resume, F11 fullscreen, Q quit", width / 2,
                      (int)PauseRowBounds(PAUSE_ROW_COUNT).y + 30, 24, (Color){255, 230, 120, 255});
+    rlPopMatrix();
+}
+
+#define DEBUG_ROW_HEIGHT 32
+#define DEBUG_FONT_SIZE 24
+#define DEBUG_TITLE_SIZE 56
+#define DEBUG_TITLE_GAP 70
+#define DEBUG_FOOTER_GAP 16
+#define DEBUG_FOOTER_SIZE 20
+
+/* The rows stay left-aligned, so the list is centered by its widest label. */
+Rectangle DebugRowBounds(int row)
+{
+    int list_width = 0;
+    for (int i = 0; i < DEBUG_COMMAND_COUNT; i++) list_width = (int)fmaxf((float)list_width, (float)MeasureText(DEBUG_COMMANDS[i].label, DEBUG_FONT_SIZE));
+    int menu_height = DEBUG_TITLE_GAP + DEBUG_COMMAND_COUNT * DEBUG_ROW_HEIGHT + DEBUG_FOOTER_GAP + DEBUG_FOOTER_SIZE;
+    int top = (UiHeight() - menu_height) / 2 + DEBUG_TITLE_GAP;
+    return (Rectangle){(float)((UiWidth() - list_width) / 2), (float)(top + row * DEBUG_ROW_HEIGHT), (float)list_width,
+                       (float)DEBUG_ROW_HEIGHT};
+}
+
+void DrawDebugOverlay(const GameState *g, int selected)
+{
+    int width = UiWidth(), height = UiHeight();
+    rlPushMatrix();
+    rlScalef(UiScale(), UiScale(), 1.0f);
+    DrawRectangle(0, 0, width, height, (Color){0, 0, 0, 150});
+    DrawTextCentered("DEBUG", width / 2, (int)DebugRowBounds(0).y - DEBUG_TITLE_GAP, DEBUG_TITLE_SIZE, WHITE);
+
+    for (int i = 0; i < DEBUG_COMMAND_COUNT; i++) {
+        Rectangle row = DebugRowBounds(i);
+        Color color = i == selected ? (Color){255, 230, 120, 255} : (Color){255, 255, 255, 190};
+        const char *label = DEBUG_COMMANDS[i].label;
+        if (DEBUG_COMMANDS[i].kind == DEBUG_GOD_MODE) label = TextFormat("God mode: %s", g->god_mode ? "ON" : "OFF");
+        DrawTextShadow(label, (int)row.x, (int)row.y, DEBUG_FONT_SIZE, color);
+    }
+
+    DrawTextCentered("Up/Down select, Enter or click apply, F1 or Esc close", width / 2,
+                     (int)DebugRowBounds(DEBUG_COMMAND_COUNT).y + DEBUG_FOOTER_GAP, DEBUG_FOOTER_SIZE, (Color){255, 230, 120, 255});
     rlPopMatrix();
 }
