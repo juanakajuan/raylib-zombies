@@ -206,13 +206,13 @@ static bool ZombieTargetable(const Zombie *z)
     return z->state == ZOMBIE_CHASE || z->state == ZOMBIE_ATTACK;
 }
 
-/* A step is refused only when it closes on a body already within touching distance, so overlapping bodies can still part. */
 /* Zombies stay on the floor, so a jump never changes where they can reach. */
 static Vector3 PlayerFloorPoint(const GameState *g)
 {
     return (Vector3){g->player.pos.x, 0.0f, g->player.pos.z};
 }
 
+/* A step is refused only when it closes on a body already within touching distance, so overlapping bodies can still part. */
 static bool StepsIntoBody(Vector3 from, Vector3 to, Vector3 other)
 {
     float before = hypotf(from.x - other.x, from.z - other.z);

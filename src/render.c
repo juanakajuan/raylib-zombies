@@ -342,7 +342,7 @@ void GameDraw(const GameState *g, float fov_degrees)
 {
     const Player *p = &g->player;
     Vector3 eye = PlayerEye(p);
-    if (g->phase == PHASE_GAME_OVER) eye.y = Lerp(PlayerEye(p).y, 0.45f, Clamp(g->phase_timer * 2.0f, 0.0f, 1.0f));
+    if (g->phase == PHASE_GAME_OVER) eye.y = Lerp(eye.y, 0.45f, Clamp(g->phase_timer * 2.0f, 0.0f, 1.0f));
     Camera3D camera = {
         .position = eye,
         .target = Vector3Add(eye, PlayerForward(p)),
