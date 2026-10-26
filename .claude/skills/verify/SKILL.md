@@ -55,7 +55,7 @@ Each command sends real input to the game window. They return when the input is 
 
 | Command | User action |
 | --- | --- |
-| `zv key w --hold 1.0` | Hold a key for a time. Names are X keysyms: `w a s d e r q Escape F11 F12 Return Shift_L Alt_L`. |
+| `zv key w --hold 1.0` | Hold a key for a time. Names are X keysyms: `w a s d e r q space Control_L c Escape F11 F12 Return Shift_L Alt_L`. |
 | `zv key w+Shift_L --hold 1.0` | Hold several keys together (sprint forward). `Alt_L+Return` toggles fullscreen. |
 | `zv key r --repeat 3 --gap 0.2` | Tap a key several times. |
 | `zv click --count 3` | Fire. Default 0.35 s between clicks (M1911 fires every 0.28 s, semi-automatic). |

@@ -53,6 +53,8 @@ static FrameInput ReadInput(float sensitivity)
     in.interact_pressed = IsKeyPressed(KEY_E);
     in.swap_pressed = IsKeyPressed(KEY_Q);
     in.sprint_held = IsKeyDown(KEY_LEFT_SHIFT);
+    in.crouch_held = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_C);
+    in.jump_pressed = IsKeyPressed(KEY_SPACE);
     in.restart_pressed = IsKeyPressed(KEY_R);
     return in;
 }
@@ -63,11 +65,13 @@ static void MergeInput(FrameInput *pending, const FrameInput *fresh)
     pending->move = fresh->move;
     pending->fire_held = fresh->fire_held;
     pending->sprint_held = fresh->sprint_held;
+    pending->crouch_held = fresh->crouch_held;
     pending->look = Vector2Add(pending->look, fresh->look);
     pending->fire_pressed = pending->fire_pressed || fresh->fire_pressed;
     pending->reload_pressed = pending->reload_pressed || fresh->reload_pressed;
     pending->interact_pressed = pending->interact_pressed || fresh->interact_pressed;
     pending->swap_pressed = pending->swap_pressed || fresh->swap_pressed;
+    pending->jump_pressed = pending->jump_pressed || fresh->jump_pressed;
     pending->restart_pressed = pending->restart_pressed || fresh->restart_pressed;
 }
 
@@ -78,6 +82,7 @@ static void ClearOneShots(FrameInput *in)
     in->reload_pressed = false;
     in->interact_pressed = false;
     in->swap_pressed = false;
+    in->jump_pressed = false;
     in->restart_pressed = false;
 }
 

@@ -9,10 +9,16 @@
 #define TILE_SIZE 2.0f
 #define LABEL_RANGE 12.0f
 #define VIGNETTE_SIZE 200
+#define HEALTH_BAR_HEIGHT 2.05f
+#define HEALTH_BAR_WIDTH 0.6f
+#define HEALTH_BAR_THICKNESS 0.07f
+#define HEALTH_BAR_FILL_LIFT 0.004f
+#define DAMAGE_NUMBER_RISE 0.5f
 
 static const Color SKY = {14, 14, 20, 255};
 static const Color CEILING = {44, 44, 52, 255};
 static const Color WALL = {112, 108, 118, 255};
+static const Color OVERHANG = {104, 62, 44, 255};
 static const Color WALL_WIRE = {40, 38, 46, 255};
 static const Color FLOOR_FRONT[2] = {{94, 86, 78, 255}, {78, 71, 64, 255}};
 static const Color FLOOR_BACK[2] = {{68, 78, 92, 255}, {56, 64, 78, 255}};
@@ -32,6 +38,11 @@ static const Color EYES = {255, 50, 40, 255};
 static const Color GUN_METAL = {38, 40, 46, 255};
 static const Color GUN_GRIP = {86, 58, 38, 255};
 static const Color MUZZLE_FLASH = {255, 222, 130, 255};
+static const Color HEALTH_BAR_BACK = {12, 10, 10, 255};
+static const Color HEALTH_BAR_FILL = {200, 30, 30, 255};
+static const Color DAMAGE_BODY = {255, 255, 255, 255};
+static const Color DAMAGE_HEADSHOT = {255, 220, 60, 255};
+static const Color DAMAGE_KILL = {255, 120, 70, 255};
 
 static const Color WEAPON_PANEL[WEAPON_COUNT] = {
     [WEAPON_PISTOL] = {150, 150, 150, 255},
@@ -132,6 +143,10 @@ static void DrawLevel(const GameState *g)
     for (int i = 0; i < LEVEL_WALL_COUNT; i++) {
         DrawSolidBox(LEVEL_WALLS[i], WALL);
         DrawCubeWiresV(BoxCenter(LEVEL_WALLS[i]), Vector3Subtract(LEVEL_WALLS[i].max, LEVEL_WALLS[i].min), WALL_WIRE);
+    }
+    for (int i = 0; i < LEVEL_OVERHANG_COUNT; i++) {
+        DrawSolidBox(LEVEL_OVERHANGS[i], OVERHANG);
+        DrawCubeWiresV(BoxCenter(LEVEL_OVERHANGS[i]), Vector3Subtract(LEVEL_OVERHANGS[i].max, LEVEL_OVERHANGS[i].min), WALL_WIRE);
     }
     for (int i = 0; i < LEVEL_INTERACTABLE_COUNT; i++) DrawInteractable(g, &LEVEL_INTERACTABLES[i]);
 }
@@ -257,6 +272,26 @@ static void DrawCrosshair(const Player *p, int width, int height)
     }
 }
 
+static void DrawDamageNumbers(const GameState *g, Camera3D camera)
+{
+    Vector3 forward = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
+    float scale = UiScale();
+    for (int i = 0; i < MAX_DAMAGE_NUMBERS; i++) {
+        const DamageNumber *n = &g->damage_numbers[i];
+        if (n->timer <= 0.0f) continue;
+        float age = 1.0f - n->timer / DAMAGE_NUMBER_TIME;
+        Vector3 anchor = n->pos;
+        anchor.y += DAMAGE_NUMBER_RISE * age;
+        if (Vector3DotProduct(Vector3Subtract(anchor, camera.position), forward) <= 0.1f) continue;
+        Vector2 screen = GetWorldToScreen(anchor, camera);
+        Color color = n->kill ? DAMAGE_KILL : n->headshot ? DAMAGE_HEADSHOT : DAMAGE_BODY;
+        color.a = (unsigned char)(255.0f * Clamp((1.0f - age) * 2.0f, 0.0f, 1.0f));
+        /* Consecutive hits land in different slots, so a per-slot nudge keeps rapid hits on one spot readable. */
+        int nudge = (i * 7 % 5 - 2) * 12;
+        DrawTextCentered(TextFormat("%d", (int)ceilf(n->amount)), (int)(screen.x / scale) + nudge, (int)(screen.y / scale), n->headshot ? 26 : 22, color);
+    }
+}
+
 static void DrawInteractableLabels(const GameState *g, Camera3D camera)
 {
     Vector3 forward = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
@@ -288,6 +323,7 @@ static void DrawHud(const GameState *g, Camera3D camera)
     DrawVignette(p, width, height);
     if (playing) {
         DrawInteractableLabels(g, camera);
+        DrawDamageNumbers(g, camera);
         DrawCrosshair(p, width, height);
     }
 
@@ -339,11 +375,33 @@ static void DrawHud(const GameState *g, Camera3D camera)
     rlPopMatrix();
 }
 
+static void DrawHealthBar(const Zombie *z, Vector3 camera_position)
+{
+    if (z->state != ZOMBIE_CHASE && z->state != ZOMBIE_ATTACK) return;
+    Vector3 center = {z->pos.x, HEALTH_BAR_HEIGHT, z->pos.z};
+    Vector3 toward = Vector3Normalize(Vector3Subtract(camera_position, center));
+    Vector3 right = Vector3Normalize(Vector3CrossProduct((Vector3){0.0f, 1.0f, 0.0f}, toward));
+    Vector3 up = Vector3CrossProduct(toward, right);
+    Vector3 half_width = Vector3Scale(right, HEALTH_BAR_WIDTH * 0.5f);
+    Vector3 half_height = Vector3Scale(up, HEALTH_BAR_THICKNESS * 0.5f);
+    float ratio = Clamp(z->health / z->max_health, 0.0f, 1.0f);
+
+    rlBegin(RL_QUADS);
+    Quad(Vector3Subtract(Vector3Subtract(center, half_width), half_height), Vector3Subtract(Vector3Add(center, half_width), half_height),
+         Vector3Add(Vector3Add(center, half_width), half_height), Vector3Add(Vector3Subtract(center, half_width), half_height), HEALTH_BAR_BACK);
+    Vector3 fill_center = Vector3Add(center, Vector3Scale(toward, HEALTH_BAR_FILL_LIFT));
+    Vector3 left = Vector3Subtract(fill_center, half_width);
+    Vector3 edge = Vector3Add(left, Vector3Scale(right, HEALTH_BAR_WIDTH * ratio));
+    Quad(Vector3Subtract(left, half_height), Vector3Subtract(edge, half_height), Vector3Add(edge, half_height), Vector3Add(left, half_height),
+         HEALTH_BAR_FILL);
+    rlEnd();
+}
+
 void GameDraw(const GameState *g, float fov_degrees)
 {
     const Player *p = &g->player;
     Vector3 eye = PlayerEye(p);
-    if (g->phase == PHASE_GAME_OVER) eye.y = Lerp(PLAYER_EYE_HEIGHT, 0.45f, Clamp(g->phase_timer * 2.0f, 0.0f, 1.0f));
+    if (g->phase == PHASE_GAME_OVER) eye.y = Lerp(eye.y, 0.45f, Clamp(g->phase_timer * 2.0f, 0.0f, 1.0f));
     Camera3D camera = {
         .position = eye,
         .target = Vector3Add(eye, PlayerForward(p)),
@@ -357,6 +415,7 @@ void GameDraw(const GameState *g, float fov_degrees)
     rlDisableBackfaceCulling();
     DrawLevel(g);
     for (int i = 0; i < MAX_ZOMBIES; i++) DrawZombie(&g->zombies[i]);
+    for (int i = 0; i < MAX_ZOMBIES; i++) DrawHealthBar(&g->zombies[i], eye);
     if (g->phase != PHASE_GAME_OVER) DrawViewModel(p, eye);
     rlEnableBackfaceCulling();
     EndMode3D();
