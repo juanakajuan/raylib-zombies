@@ -32,7 +32,7 @@ add_custom_target(copy_assets
 add_dependencies(zombies copy_assets)
 
 enable_testing()
-add_executable(zombies_test tests/game_test.c)
+add_executable(zombies_test tests/game_test.c src/audio.c)
 target_link_libraries(zombies_test PRIVATE game_core)
 zombies_strict(zombies_test)
 add_test(NAME core_loop COMMAND zombies_test)

@@ -18,12 +18,13 @@ Preconditions:
 
 - `zv build` succeeded.
 
-- **Run it headless.** Launch through zv so the window stays off the desktop. Run `zv launch --run smoke-1 -- --smoke; sleep 14; zv runs; cat verify-artifacts/smoke-1/game.log | grep '^smoke:'`. `zv launch` may print `ready` or fail with `game exited during startup` if the bot ends first. `zv runs` shows `smoke-1 stopped`. The log has one `smoke: round=1 ...` line and no `expected 3 screenshots` error.
+- **Run it headless.** Launch through zv so the window stays off the desktop. Run `zv launch --run smoke-1 -- --smoke; sleep 14; zv runs; cat verify-artifacts/smoke-1/game.log | grep '^smoke:'`. `zv launch` may print `ready` or fail with `game exited during startup` if the bot ends first. `zv runs` shows `smoke-1 stopped`. The log has the line `AUDIO: muted, audio device not opened`, one `smoke: round=1 ...` line, and no `expected 3 screenshots` error.
 - **Screenshots.** Run `ls verify-artifacts/smoke-1/smoke_*.png`. Three files exist. Read them: shot 1 is the start view, shot 2 the MP5K prompt or purchase, shot 3 combat.
 - **Proof.** Run `zv stop --run smoke-1`. Report the `smoke:` line and the three PNGs.
 
 ## Gotchas
 
 - Smoke mode gives itself 3000 points and skips most of the countdown. Never use it as proof of a purchase or round feature. Use the matching feature recipe.
+- Smoke mode does not read `settings.cfg`, so the `volume=0` file from zv has no effect on it. Silence comes from `--mute` and `ZOMBIES_MUTE=1`, which `zv launch` always gives. If the log does not have the muted line, stop the run.
 - The game cannot report its exit code through gamescope. Use the `smoke:` line and the PNG count instead.
-- `./run.sh --smoke` without zv opens a real window on the user's desktop and grabs nothing, but it does take focus for a few seconds.
+- `./run.sh --smoke` without zv opens a real window on the user's desktop, takes focus for a few seconds, and plays audio. The guard hook blocks it for agents.
