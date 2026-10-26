@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 import array
+import runpy
 import sys
 import wave
 from pathlib import Path
 
-sys.dont_write_bytecode = True  # Python reuses a cached table when an edit keeps the file size and the mtime second.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from sound_levels import CLIPS
+# run_path compiles the source each time. An import can reuse a stale .pyc when an edit keeps the size and the mtime second.
+CLIPS = runpy.run_path(str(Path(__file__).resolve().parent / "sound_levels.py"))["CLIPS"]
 
 TOLERANCE = 0.005
 
