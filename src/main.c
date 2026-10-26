@@ -101,6 +101,7 @@ static void SetDisplayMode(DisplayMode mode)
     switch (mode) {
     case DISPLAY_FULLSCREEN:
         if (IsWindowFullscreen()) return;
+        SetWindowSize(monitor_width, monitor_height);
         ToggleFullscreen();
         SetWindowMonitor(0);
         return;
