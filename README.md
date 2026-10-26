@@ -7,7 +7,7 @@ Survive rounds of zombies, earn points by shooting them, and spend points on a d
 
 `./run.sh` builds the game if needed and then starts it. It passes its arguments to the game, as in `./run.sh --fullscreen`.
 
-The game opens in a 1280x720 window on the primary monitor. Use `--fullscreen` to start in fullscreen at the monitor's native resolution. `--smoke` runs a scripted session that saves three screenshots and always uses the window.
+The game starts in fullscreen at the monitor's native resolution. Use `--windowed` to start in a 1280x720 window on the primary monitor. `--smoke` runs a scripted session that saves three screenshots and always uses the window.
 
 To do the steps by hand:
 
