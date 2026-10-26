@@ -23,7 +23,7 @@ Secondary surfaces:
 ## Requirements
 
 - `gamescope` (headless backend), `cmake`, a C compiler, `python3` with `Xlib` (python-xlib) and `PIL` (Pillow). On this machine all are present.
-- The first configure downloads raylib 5.5 with CMake `FetchContent`. In a git worktree of this repo, reuse the main checkout's copy instead: `export FETCHCONTENT_SOURCE_DIR_RAYLIB=<main checkout>/build/_deps/raylib-src` before `zv launch` or `zv build`.
+- Configure uses the shared raylib 5.5 source in `${XDG_CACHE_HOME:-~/.cache}/raylib-zombies/raylib-5.5`. The first configure on a machine clones it there. All worktrees use it, so no export is necessary.
 
 ## Launch
 
