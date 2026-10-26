@@ -42,8 +42,34 @@ DELIMITER = re.compile(r"[ \t]*(\\?)(['\"]?)([^\s'\";&|()<>\\]+)\2")
 
 # Code found inside a command: its text, the index of the simple command it belongs to, and whether it always runs.
 # A heredoc body runs only when that simple command feeds a shell. The `$(...)` and backticks in a body with an
-# unquoted delimiter always run, so that body is also kept as a double-quoted string.
+# unquoted delimiter always run.
 Nested = tuple[str, int, bool]
+
+
+def body_substitutions(body: str) -> list[str]:
+    """The code in `$(...)` and backticks of a heredoc body with an unquoted delimiter. Quotes are text there."""
+    found: list[str] = []
+    i = 0
+    n = len(body)
+    while i < n:
+        if body[i] == "\\":
+            i += 2
+        elif body.startswith("$((", i):
+            end = body.find("))", i + 3)
+            i = n if end < 0 else end + 2
+        elif body.startswith("$(", i):
+            _, _, end = scan(body, i + 2, closer=True)
+            found.append(body[i + 2:end])
+            i = end + 1
+        elif body[i] == "`":
+            end = i + 1
+            while end < n and body[end] != "`":
+                end += 2 if body[end] == "\\" else 1
+            found.append(body[i + 1:end])
+            i = end + 1
+        else:
+            i += 1
+    return found
 
 
 def scan(t: str, i: int = 0, closer: bool = False) -> tuple[list[list[str]], list[Nested], int]:
@@ -168,8 +194,7 @@ def scan(t: str, i: int = 0, closer: bool = False) -> tuple[list[list[str]], lis
                 body = t[start:body_end]
                 nested.append((body, index, False))
                 if not quoted:
-                    as_double_quoted = re.sub(r"\\(?![$`\\\n])", r"\\\\", body).replace('"', '\\"')
-                    nested.append(('echo "' + as_double_quoted + '"', index, True))
+                    nested += [(code, index, True) for code in body_substitutions(body)]
             heredocs = []
         elif c == ")" and closer and depth == 0:
             end_word()
@@ -321,6 +346,9 @@ SELFTEST: list[tuple[str, bool]] = [
     ("cat > notes.md <<EOF\nRan `./build/zombies --smoke`\nEOF", True),
     ("cat > notes.md <<EOF\nRan $(./build/zombies --smoke)\nEOF", True),
     ("cat <<\\EOF\nx\nEOF\n./build/zombies", True),
+    ("cat > notes.md <<EOF\nPath \"C:\\\\\" isn't `./build/zombies --smoke`\nEOF", True),
+    ("cat > notes.md <<EOF\nPath \"C:\\\\\" # `./build/zombies --smoke`\nEOF", True),
+    ("cat > notes.md <<EOF\nRegex \"\\\\\\\\\" won't match; $(./build/zombies --smoke)\nEOF", True),
     ("./build/zombies --smoke 2>&1 | tee log", True),
     ("{ ./build/zombies; }", True),
     ("if true; then ./build/zombies; fi", True),
@@ -362,6 +390,8 @@ SELFTEST: list[tuple[str, bool]] = [
     ("cat > notes.md <<EOF\nDo not run \\`./build/zombies --smoke\\` directly.\nEOF", False),
     ("cat > notes.md <<EOF\nEscaped: \\$(./build/zombies --smoke) is text\nEOF", False),
     ("cat > notes.md <<EOF\nA \\\" quote, a \\\\ and `./build/zombies --mute`\nEOF", False),
+    ("cat > notes.md <<EOF\nWindows path \"C:\\\\\" is fine\n./build/zombies --smoke\nEOF", False),
+    ("cat > notes.md <<EOF\nprintf(\"\\\\\"); then\n./build/zombies --smoke\nEOF", False),
     ('git commit -m "first line\n\n./build/zombies now needs --mute"', False),
     ("git commit -m \"$(cat <<'EOF'\nDon't run ./build/zombies; use zv\nEOF\n)\"", False),
     ("gh pr create --body-file - <<'EOF'\n## Summary\n./run.sh is blocked, see #15\nEOF", False),
