@@ -195,12 +195,19 @@ static void DrawTextShadow(const char *text, int x, int y, int size, Color color
     DrawText(text, x, y, size, color);
 }
 
-/* The HUD is laid out for a window UI_REFERENCE_HEIGHT pixels tall and scaled to the real height. */
+/* The HUD is laid out for a window UI_REFERENCE_HEIGHT pixels tall. It grows with the window at half the rate of
+ * the height, so a 4K screen gets 2x and not 3x. */
 #define UI_REFERENCE_HEIGHT 720.0f
+#define UI_SCALE_RATE 0.5f
 
 static float UiScale(void)
 {
-    return (float)GetScreenHeight() / UI_REFERENCE_HEIGHT;
+    return 1.0f + ((float)GetScreenHeight() / UI_REFERENCE_HEIGHT - 1.0f) * UI_SCALE_RATE;
+}
+
+static int UiHeight(void)
+{
+    return (int)((float)GetScreenHeight() / UiScale());
 }
 
 static int UiWidth(void)
@@ -270,7 +277,7 @@ static void DrawInteractableLabels(const GameState *g, Camera3D camera)
 static void DrawHud(const GameState *g, Camera3D camera)
 {
     const Player *p = &g->player;
-    int width = UiWidth(), height = (int)UI_REFERENCE_HEIGHT;
+    int width = UiWidth(), height = UiHeight();
     const Color blood = {200, 24, 24, 255};
 
     bool playing = g->phase != PHASE_GAME_OVER;
@@ -360,7 +367,7 @@ void GameDraw(const GameState *g, float fov_degrees)
 
 Rectangle PauseRowBounds(int row)
 {
-    int width = UiWidth(), height = (int)UI_REFERENCE_HEIGHT;
+    int width = UiWidth(), height = UiHeight();
     return (Rectangle){(float)(width / 2 - 260), (float)(height / 3 + 130 + row * PAUSE_ROW_HEIGHT), 620.0f, (float)PAUSE_ROW_HEIGHT};
 }
 
@@ -373,7 +380,7 @@ Rectangle PauseBarBounds(int row)
 void DrawPauseOverlay(const Settings *settings, int selected)
 {
     const int font_size = 28;
-    int width = UiWidth(), height = (int)UI_REFERENCE_HEIGHT;
+    int width = UiWidth(), height = UiHeight();
     rlPushMatrix();
     rlScalef(UiScale(), UiScale(), 1.0f);
     DrawRectangle(0, 0, width, height, (Color){0, 0, 0, 150});

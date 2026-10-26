@@ -375,8 +375,11 @@ int main(int argc, char **argv)
             return 2;
         }
     }
-    SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);
+    /* The window starts hidden so the compositor places it, and picks its workspace, on the primary monitor. */
+    SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE | FLAG_WINDOW_HIDDEN);
     InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Zombies");
+    SetWindowPosition((int)GetMonitorPosition(0).x, (int)GetMonitorPosition(0).y);
+    ClearWindowState(FLAG_WINDOW_HIDDEN);
     SetDisplayMode(smoke ? DISPLAY_WINDOWED : mode);
     SetTargetFPS(TARGET_FPS);
     AudioInit();
