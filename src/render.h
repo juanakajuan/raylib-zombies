@@ -5,6 +5,8 @@
 #include "settings.h"
 
 void GameDraw(const GameState *g, float fov_degrees);
+/* Draws the game frame blurred, as the backdrop of a menu. */
+void GameDrawBlurred(const GameState *g, float fov_degrees);
 /* The pause menu lists every setting, then one row for the window mode. */
 #define PAUSE_ROW_DISPLAY SETTING_COUNT
 #define PAUSE_ROW_COUNT (SETTING_COUNT + 1)

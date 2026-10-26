@@ -282,7 +282,8 @@ static int RunGame(bool debug)
             AdvanceSim(&game, &clock, &in, GetFrameTime());
         }
         BeginDrawing();
-        GameDraw(&game, settings.fov);
+        if (overlay == OVERLAY_NONE) GameDraw(&game, settings.fov);
+        else GameDrawBlurred(&game, settings.fov);
         if (overlay == OVERLAY_PAUSE) DrawPauseOverlay(&settings, menu.selected, IsWindowFullscreen());
         if (overlay == OVERLAY_DEBUG) DrawDebugOverlay(&game, debug_menu.selected);
         EndDrawing();

@@ -422,6 +422,89 @@ void GameDraw(const GameState *g, float fov_degrees)
     DrawHud(g, camera);
 }
 
+#define BLUR_DOWNSCALE 2
+#define BLUR_SPREAD 2.0f
+
+static const char BLUR_SHADER[] =
+    "#version 330\n"
+    "in vec2 fragTexCoord;\n"
+    "in vec4 fragColor;\n"
+    "uniform sampler2D texture0;\n"
+    "uniform vec4 colDiffuse;\n"
+    "uniform vec2 direction;\n"
+    "out vec4 finalColor;\n"
+    "const float weights[5] = float[](0.227027, 0.1945946, 0.1216216, 0.054054, 0.016216);\n"
+    "void main()\n"
+    "{\n"
+    "    vec3 sum = texture(texture0, fragTexCoord).rgb * weights[0];\n"
+    "    for (int i = 1; i < 5; i++) {\n"
+    "        vec2 offset = direction * float(i);\n"
+    "        sum += texture(texture0, fragTexCoord + offset).rgb * weights[i];\n"
+    "        sum += texture(texture0, fragTexCoord - offset).rgb * weights[i];\n"
+    "    }\n"
+    "    finalColor = vec4(sum, 1.0) * colDiffuse * fragColor;\n"
+    "}\n";
+
+typedef struct BlurTargets {
+    Shader shader;
+    int direction_loc;
+    RenderTexture2D scene;
+    RenderTexture2D half; /* holds the horizontal pass at reduced size */
+} BlurTargets;
+
+static RenderTexture2D LoadBlurTexture(int width, int height)
+{
+    RenderTexture2D target = LoadRenderTexture(width, height);
+    SetTextureFilter(target.texture, TEXTURE_FILTER_BILINEAR);
+    SetTextureWrap(target.texture, TEXTURE_WRAP_CLAMP);
+    return target;
+}
+
+/* Created on first use and again when the window size changes, so a fullscreen toggle in the pause menu stays sharp. */
+static BlurTargets *PrepareBlur(int width, int height)
+{
+    static BlurTargets blur;
+    if (blur.shader.id == 0) {
+        blur.shader = LoadShaderFromMemory(NULL, BLUR_SHADER);
+        blur.direction_loc = GetShaderLocation(blur.shader, "direction");
+    }
+    if (blur.scene.texture.width != width || blur.scene.texture.height != height) {
+        if (blur.scene.id != 0) {
+            UnloadRenderTexture(blur.scene);
+            UnloadRenderTexture(blur.half);
+        }
+        blur.scene = LoadBlurTexture(width, height);
+        blur.half = LoadBlurTexture(width / BLUR_DOWNSCALE, height / BLUR_DOWNSCALE);
+    }
+    return &blur;
+}
+
+static void DrawBlurPass(const BlurTargets *blur, Texture2D source, Vector2 direction, Rectangle dest)
+{
+    SetShaderValue(blur->shader, blur->direction_loc, &direction, SHADER_UNIFORM_VEC2);
+    BeginShaderMode(blur->shader);
+    /* Render textures are stored upside down, so the source rectangle flips them. */
+    DrawTexturePro(source, (Rectangle){0.0f, 0.0f, (float)source.width, -(float)source.height}, dest, Vector2Zero(), 0.0f, WHITE);
+    EndShaderMode();
+}
+
+void GameDrawBlurred(const GameState *g, float fov_degrees)
+{
+    int width = GetScreenWidth(), height = GetScreenHeight();
+    BlurTargets *blur = PrepareBlur(width, height);
+    Texture2D scene = blur->scene.texture, half = blur->half.texture;
+
+    BeginTextureMode(blur->scene);
+    GameDraw(g, fov_degrees);
+    EndTextureMode();
+
+    BeginTextureMode(blur->half);
+    DrawBlurPass(blur, scene, (Vector2){BLUR_SPREAD / (float)scene.width, 0.0f}, (Rectangle){0.0f, 0.0f, (float)half.width, (float)half.height});
+    EndTextureMode();
+
+    DrawBlurPass(blur, half, (Vector2){0.0f, BLUR_SPREAD / (float)half.height}, (Rectangle){0.0f, 0.0f, (float)width, (float)height});
+}
+
 #define PAUSE_ROW_HEIGHT 44
 #define PAUSE_BAR_WIDTH 200
 
