@@ -8,8 +8,8 @@ Use the verify skill (`zv launch`), which mutes the game and runs a private head
 gamescope on its own bus.
 
 The launch check reads shell words, not a full shell grammar. It finds the game when it
-is the command of a simple command, or any word after a known wrapper (gamescope, gdb,
-timeout, and so on), also inside `bash -c`. It ignores heredoc bodies and comments.
+is the command of a simple command, or any word after a launcher such as gamescope, gdb
+or timeout, also inside `bash -c`. It ignores heredoc bodies, comments and quoted text.
 Run with --selftest to check the rules.
 """
 
@@ -26,70 +26,69 @@ RULES: list[tuple[str, str]] = [
     (r"\bDISPLAY=:0\b", "this targets the user's own desktop display"),
 ]
 
-WRAPPERS = {"env", "exec", "nohup", "setsid", "command", "nice", "ionice", "stdbuf", "timeout", "time", "sudo",
-            "xvfb-run", "dbus-run-session", "gamescope", "strace", "ltrace", "valgrind", "gdb", "perf", "taskset",
-            "mangohud", "prime-run", "script", "xargs", "watch", "bash", "sh",
-            "then", "do", "else", "if", "while", "until", "!", "{"}
+# The program to run follows these words, after their options. Any game word after one counts as a launch.
+LAUNCHERS = {"env", "exec", "nohup", "setsid", "nice", "ionice", "stdbuf", "timeout", "time", "xvfb-run",
+             "dbus-run-session", "gamescope", "strace", "ltrace", "valgrind", "gdb", "perf", "taskset", "mangohud",
+             "prime-run", "script", "bash", "sh", "source", "."}
+KEYWORDS = {"then", "do", "else", "elif", "if", "while", "until", "!", "{"}
 ASSIGNMENT = re.compile(r"\w+=.*")
 GAME = re.compile(r"\S*/zombies|(\S*/)?run\.sh")
 MUTE_VAR = re.compile(r"ZOMBIES_MUTE=(?!0?$).*")
 SEPARATOR = re.compile(r"[;&|()\n]+")
-HEREDOC = re.compile(r"(?<!<)<<(?!<)-?\s*(['\"]?)(\w+)\1")
 
 
-def without_heredoc_bodies(command: str) -> str:
-    kept: list[str] = []
+def lex(text: str) -> list[str]:
+    lexer = shlex.shlex(text, posix=True, punctuation_chars=";&|()<>")
+    lexer.whitespace_split = True
+    return list(lexer)
+
+
+def words_of(command: str) -> list[str]:
+    """Shell words, one line at a time. A line with an open quote joins the next. Heredoc bodies are dropped."""
+    words: list[str] = []
     delimiters: list[str] = []
+    pending = ""
     for line in command.split("\n"):
         if delimiters:
             if line.strip() == delimiters[0]:
                 delimiters.pop(0)
             continue
-        kept.append(line)
-        delimiters.extend(match[2] for match in HEREDOC.finditer(line))
-    return "\n".join(kept)
+        pending = f"{pending}\n{line}" if pending else line
+        try:
+            line_words = lex(pending)
+        except ValueError:
+            continue
+        pending = ""
+        delimiters += [after.lstrip("-") for word, after in zip(line_words, line_words[1:]) if word == "<<"]
+        words += [*line_words, "\n"]
+    return words + pending.split()
 
 
 def simple_commands(command: str) -> list[list[str]]:
-    text = without_heredoc_bodies(command)
-    lexer = shlex.shlex(text, posix=True, punctuation_chars=";&|()<>\n")
-    lexer.whitespace = " \t\r"
-    lexer.whitespace_split = True
-    lexer.commenters = ""
-    try:
-        words = list(lexer)
-    except ValueError:
-        words = text.split()
     segments: list[list[str]] = [[]]
-    in_comment = False
-    for word in words:
+    for word in words_of(command):
         if SEPARATOR.fullmatch(word):
-            in_comment = in_comment and "\n" not in word
             segments.append([])
-        elif word.startswith("#") or in_comment:
-            in_comment = True
         else:
             segments[-1].append(word)
     return [segment for segment in segments if segment]
 
 
 def unmuted_launch(command: str, muted: bool = False) -> bool:
-    """True when a simple command starts the game, directly or behind a wrapper, with no mute for it.
-
-    After a wrapper the check fails closed: any game word later in that command counts.
-    """
+    """True when a simple command starts the game, directly or after a launcher word, with no mute for it."""
     segments = simple_commands(command)
     muted = muted or any(MUTE_VAR.fullmatch(word) for segment in segments if segment[0] == "export" for word in segment)
     for segment in segments:
         i = 0
-        while i < len(segment) and ASSIGNMENT.fullmatch(segment[i]):
+        while i < len(segment) and (ASSIGNMENT.fullmatch(segment[i]) or segment[i] in KEYWORDS):
             i += 1
         segment_muted = muted or "--mute" in segment or any(MUTE_VAR.fullmatch(word) for word in segment)
         rest = [word.strip("`") for word in segment[i:]]
         if not rest:
             continue
-        if rest[0] in WRAPPERS:
-            if rest[0] in ("bash", "sh"):
+        program = rest[0].rsplit("/", 1)[-1] if rest[0] != "." else "."
+        if program in LAUNCHERS:
+            if program in ("bash", "sh"):
                 for flag, script in zip(rest, rest[1:]):
                     if flag.startswith("-") and flag.endswith("c") and unmuted_launch(script, segment_muted):
                         return True
@@ -138,10 +137,19 @@ SELFTEST: list[tuple[str, bool]] = [
     ("gdb -batch -ex run -ex bt --args ./build/zombies --smoke", True),
     ("strace -f -o /tmp/t ./build/zombies", True),
     ("perf record -g ./build/zombies --smoke", True),
-    ("sudo -u juan ./build/zombies", True),
     ("cat > n.md <<-EOF\n\tnotes\n\tEOF\n./build/zombies --smoke", True),
     ("cat > n.md <<'EOF'\nSee issue #15\nEOF\n./build/zombies --smoke", True),
     ("cat > n.md <<'EOF'\nDon't run it\nEOF\n./build/zombies --smoke", True),
+    ('git commit -m "#15"; ./build/zombies', True),
+    ("grep -c '#' src/main.c && ./build/zombies --smoke", True),
+    ("# don't forget to rebuild\ncmake --build build && ./build/zombies --smoke", True),
+    ("cmake --build build -j4  # it's quick\n./build/zombies --smoke", True),
+    ('git commit -m "docs: explain <<EOF handling"\n./build/zombies --smoke', True),
+    ("cat <<END-OF\nx\nEND-OF\n./build/zombies", True),
+    ("cat <<-EOF\n\tx\n\tEOF\n./build/zombies", True),
+    (". ./run.sh --smoke", True),
+    ("source run.sh", True),
+    ("/usr/bin/gamescope -- ./build/zombies", True),
     ("{ ./build/zombies; }", True),
     ("if true; then ./build/zombies; fi", True),
     ("while :; do ./build/zombies; done", True),
@@ -160,6 +168,15 @@ SELFTEST: list[tuple[str, bool]] = [
     ("export ZOMBIES_MUTE=1; ./build/zombies --smoke", False),
     ("bash -c './build/zombies --mute'", False),
     ("ZOMBIES_MUTE=1 bash -c './build/zombies --smoke'", False),
+    ("if grep -q mute run.sh; then echo ok; fi", False),
+    ("if [ -x build/zombies ]; then echo built; fi", False),
+    ("if true; then ls build/zombies; fi", False),
+    ("{ cat run.sh; } > /tmp/x", False),
+    ("! grep -q mute run.sh", False),
+    ("watch -n1 ls -l build/zombies", False),
+    ("sudo cp build/zombies /usr/local/bin/", False),
+    ("command -v ./build/zombies", False),
+    ('git commit -m "first line\n\n./build/zombies now needs --mute"', False),
     ("git commit -m \"$(cat <<'EOF'\nDon't run ./build/zombies; use zv\nEOF\n)\"", False),
     ("gh pr create --body-file - <<'EOF'\n## Summary\n./run.sh is blocked, see #15\nEOF", False),
     ("ctest --test-dir build --output-on-failure", False),
