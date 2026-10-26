@@ -88,6 +88,7 @@ add_executable(zombies_test tests/game_test.c)
 target_link_libraries(zombies_test PRIVATE game_core)
 zombies_strict(zombies_test)
 add_test(NAME core_loop COMMAND zombies_test)
+add_test(NAME sound_levels COMMAND python3 -I ${CMAKE_SOURCE_DIR}/tools/check_sounds.py)
 
 add_executable(zombies_bench tests/bench_update.c)
 target_link_libraries(zombies_bench PRIVATE game_core)

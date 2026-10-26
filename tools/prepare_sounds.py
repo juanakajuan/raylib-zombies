@@ -10,30 +10,13 @@ from pathlib import Path
 
 import numpy as np
 
-RATE = 44100
-PEAK = 0.9
-RELOAD_PEAK = 0.6
-RELOAD_CEILING = 0.3
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from sound_levels import CLIPS, RATE
+
 LIMIT_WINDOW = 0.02
 PRE_ROLL = 0.01
 FADE = 0.01
 ONSET_FRACTION = 0.1
-
-# output name: (source file, seconds to keep from the first loud sample or None for the whole file, peak level)
-CLIPS = {
-    "fire_pistol": ("A_42P.wav", 0.7, PEAK),
-    "fire_smg": ("G_31P.wav", 0.4, PEAK),
-    "fire_shotgun": ("O_21P.wav", 0.9, PEAK),
-    "reload_pistol": ("gunreload1.wav", None, RELOAD_PEAK),
-    "reload_smg": ("assaultriflereload1_0.wav", None, RELOAD_PEAK),
-    "reload_shotgun": ("shotguncock_0.wav", None, RELOAD_PEAK),
-    "growl_1": ("zombie-17.wav", None, PEAK),
-    "growl_2": ("zombie-16.wav", None, PEAK),
-    "growl_3": ("zombie-21.wav", None, PEAK),
-    "attack_1": ("zombie-24.wav", None, PEAK),
-    "attack_2": ("zombie-5.wav", None, PEAK),
-    "attack_3": ("zombie-11.wav", None, PEAK),
-}
 
 
 def decode(path: Path) -> np.ndarray:
@@ -80,10 +63,10 @@ def main() -> None:
     source = Path(sys.argv[1])
     dest = Path(sys.argv[2]) if len(sys.argv) > 2 else Path(__file__).resolve().parent.parent / "assets"
     dest.mkdir(parents=True, exist_ok=True)
-    for name, (filename, seconds, peak) in CLIPS.items():
-        clip = finish(cut(decode(source / filename), seconds), peak)
-        if name.startswith("reload_"):
-            clip = limit(clip, RELOAD_CEILING)
+    for name, entry in CLIPS.items():
+        clip = finish(cut(decode(source / entry.source), entry.keep_after_onset), entry.peak)
+        if entry.limiter_ceiling is not None:
+            clip = limit(clip, entry.limiter_ceiling)
         write(dest / f"{name}.wav", clip)
         print(f"{name}.wav {len(clip) / RATE:.2f}s")
 
