@@ -18,8 +18,13 @@ static const Color FLOOR_FRONT[2] = {{94, 86, 78, 255}, {78, 71, 64, 255}};
 static const Color FLOOR_BACK[2] = {{68, 78, 92, 255}, {56, 64, 78, 255}};
 static const Color DOOR_COLOR = {150, 62, 44, 255};
 static const Color PLANK_COLOR = {112, 82, 52, 255};
-static const Color PERK_COLOR = {46, 118, 214, 255};
-static const Color PERK_GLOW = {255, 232, 150, 255};
+static const struct {
+    Color body;
+    Color glow;
+} PERK_LOOK[PERK_COUNT] = {
+    [PERK_VITALITY] = {{46, 118, 214, 255}, {255, 232, 150, 255}},
+    [PERK_QUICK_HANDS] = {{222, 108, 36, 255}, {150, 255, 160, 255}},
+};
 static const Color SKIN = {104, 132, 98, 255};
 static const Color SHIRT = {82, 66, 58, 255};
 static const Color PANTS = {52, 58, 76, 255};
@@ -109,12 +114,14 @@ static void DrawInteractable(const GameState *g, const Interactable *it)
         DrawBox((Vector3){center.x, 0.9f, center.z}, (Vector3){size.x + 0.1f, 0.2f, size.z + 0.16f}, PLANK_COLOR);
         DrawBox((Vector3){center.x, 2.3f, center.z}, (Vector3){size.x + 0.1f, 0.2f, size.z + 0.16f}, PLANK_COLOR);
         break;
-    case INTERACT_PERK:
-        DrawSolidBox(it->box, PERK_COLOR);
+    case INTERACT_PERK: {
+        Color glow = PERK_LOOK[it->payload].glow;
+        DrawSolidBox(it->box, PERK_LOOK[it->payload].body);
         DrawCubeWiresV(center, size, WALL_WIRE);
-        DrawBox((Vector3){center.x, it->box.max.y + 0.08f, center.z}, (Vector3){size.x + 0.1f, 0.16f, size.z + 0.1f}, PERK_GLOW);
-        DrawBox((Vector3){center.x, 1.4f, it->box.min.z - 0.02f}, (Vector3){size.x * 0.7f, 0.9f, 0.06f}, PERK_GLOW);
+        DrawBox((Vector3){center.x, it->box.max.y + 0.08f, center.z}, (Vector3){size.x + 0.1f, 0.16f, size.z + 0.1f}, glow);
+        DrawBox((Vector3){center.x, 1.4f, it->box.min.z - 0.02f}, (Vector3){size.x * 0.7f, 0.9f, 0.06f}, glow);
         break;
+    }
     }
 }
 
@@ -163,7 +170,7 @@ static void DrawViewModel(const Player *p, Vector3 eye)
     float length = WEAPON_VIEW_LENGTH[slot->id];
     float dip = 0.0f;
     if (p->reload_timer > 0.0f) {
-        float progress = 1.0f - p->reload_timer / WEAPONS[slot->id].reload_time;
+        float progress = 1.0f - p->reload_timer / ReloadDuration(p, slot->id);
         dip = sinf(progress * PI) * 0.1f;
     }
     float kick = p->muzzle_timer > 0.0f ? 0.025f : 0.0f;

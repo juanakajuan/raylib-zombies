@@ -464,11 +464,21 @@ static int FindInteractable(InteractKind kind, int payload)
     return -1;
 }
 
+static bool InBackRoom(int index)
+{
+    return LEVEL_INTERACTABLES[index].box.max.z <= 0.0f;
+}
+
+static bool InFrontRoom(int index)
+{
+    return LEVEL_INTERACTABLES[index].box.min.z >= 0.0f;
+}
+
 static void StandNear(GameState *g, int interactable)
 {
     Vector3 center = BoxCenter(LEVEL_INTERACTABLES[interactable].box);
     float dx = 0.0f - center.x;
-    float dz = 7.0f - center.z;
+    float dz = (center.z < 0.0f ? -8.0f : 7.0f) - center.z;
     float length = sqrtf(dx * dx + dz * dz);
     g->player.pos = (Vector3){center.x + dx / length * 1.5f, 0.0f, center.z + dz / length * 1.5f};
 }
@@ -630,6 +640,74 @@ static void TestWeaponsAndPerk(void)
     Press(&g, interact);
     CHECK(g.player.points == 5000, "a second perk purchase must be refused, points=%d", g.player.points);
     CHECK(GameNearestInteractable(&g) != perk_item, "owned perk must not show a prompt");
+}
+
+static int FramesToReload(GameState *g)
+{
+    FrameInput idle = {0};
+    int frames = 0;
+    g->player.slots[g->player.active].mag = 0;
+    Press(g, (FrameInput){.reload_pressed = true});
+    while (g->player.reload_timer > 0.0f && frames < 60 * 10) {
+        GameUpdate(g, &idle, DT);
+        frames++;
+    }
+    return frames;
+}
+
+static void TestQuickHandsPerk(void)
+{
+    int item = FindInteractable(INTERACT_PERK, PERK_QUICK_HANDS);
+    CHECK(item >= 0, "the level must hold a Quick Hands machine");
+    if (item < 0) return;
+    CHECK(InBackRoom(item), "Quick Hands belongs behind the door");
+
+    FrameInput interact = {.interact_pressed = true};
+    GameState g = NewActiveGame();
+    g.zone_open[1] = true;
+    StandNear(&g, item);
+    g.player.points = PERKS[PERK_QUICK_HANDS].cost - 1;
+    Press(&g, interact);
+    CHECK(!PlayerHasPerk(&g.player, PERK_QUICK_HANDS) && g.player.points == PERKS[PERK_QUICK_HANDS].cost - 1,
+          "Quick Hands bought with 1 point too few, points=%d", g.player.points);
+
+    const float reload_time = WEAPONS[WEAPON_PISTOL].reload_time;
+    GameState plain = g;
+    int plain_frames = FramesToReload(&plain);
+    CHECK(fabsf((float)plain_frames * DT - reload_time) < 0.1f, "a plain reload took %.2fs, table says %.2fs", (double)plain_frames * DT, (double)reload_time);
+
+    g.player.points = PERKS[PERK_QUICK_HANDS].cost;
+    Press(&g, interact);
+    CHECK(PlayerHasPerk(&g.player, PERK_QUICK_HANDS) && !PlayerHasPerk(&g.player, PERK_VITALITY), "perks=%d", g.player.perks);
+    CHECK(g.player.points == 0, "points=%d", g.player.points);
+    CHECK(g.player.max_health == PLAYER_BASE_HEALTH, "Quick Hands must not touch max_health, got %.1f", (double)g.player.max_health);
+    CHECK(GameNearestInteractable(&g) != item, "an owned perk must not show a prompt");
+
+    g.player.points = 5000;
+    Press(&g, interact);
+    CHECK(g.player.points == 5000, "a second Quick Hands purchase must be refused, points=%d", g.player.points);
+
+    int quick_frames = FramesToReload(&g);
+    CHECK(fabsf((float)quick_frames * DT - 0.5f * reload_time) < 0.1f, "a Quick Hands reload took %.2fs, expected %.2fs", (double)quick_frames * DT,
+          (double)(0.5f * reload_time));
+    CHECK(g.player.slots[0].mag == WEAPONS[WEAPON_PISTOL].mag_size, "the quick reload must fill the magazine, mag=%d", g.player.slots[0].mag);
+}
+
+static void TestQuickHandsCannotTrapZombies(void)
+{
+    int item = FindInteractable(INTERACT_PERK, PERK_QUICK_HANDS);
+    if (item < 0) return;
+    int reached = 0;
+    int runs = 0;
+    GameState g = NewActiveGame();
+    g.zone_open[1] = true;
+    StandNear(&g, item);
+    for (int s = 0; s < LEVEL_SPAWN_COUNT; s++) {
+        Vector3 stuck_at;
+        runs++;
+        reached += ZombieHurtsPlayer(&g, s, &stuck_at);
+    }
+    CHECK(runs > 0 && reached == runs, "%d of %d zombies reached a player standing next to Quick Hands", reached, runs);
 }
 
 static void TestSwapCannotShortenTheFireCooldown(void)
@@ -806,6 +884,7 @@ static void TestInteractablesAreVisibleInPlainView(void)
 
     for (size_t e = 0; e < sizeof eyes / sizeof eyes[0]; e++) {
         for (int i = 0; i < LEVEL_INTERACTABLE_COUNT; i++) {
+            if (InBackRoom(i)) continue;
             CHECK(GameInteractableVisible(&g, i, eyes[e]), "%s must be visible from (%.1f, %.1f) in the front room", InteractableName(i),
                   (double)eyes[e].x, (double)eyes[e].z);
         }
@@ -823,7 +902,7 @@ static void TestPartitionHidesTheFrontRoomFromTheBackRoom(void)
         g.zone_open[1] = door_open != 0;
         for (size_t e = 0; e < sizeof eyes / sizeof eyes[0]; e++) {
             for (int i = 0; i < LEVEL_INTERACTABLE_COUNT; i++) {
-                if (LEVEL_INTERACTABLES[i].kind == INTERACT_DOOR) continue;
+                if (!InFrontRoom(i)) continue;
                 CHECK(!GameInteractableVisible(&g, i, eyes[e]), "%s must stay hidden from (%.1f, %.1f) behind the partition, door open=%d",
                       InteractableName(i), (double)eyes[e].x, (double)eyes[e].z, door_open);
             }
@@ -1117,6 +1196,8 @@ int main(void)
     TestZombiesCannotHitThroughThePartition();
     TestDoor();
     TestWeaponsAndPerk();
+    TestQuickHandsPerk();
+    TestQuickHandsCannotTrapZombies();
     TestSwapCannotShortenTheFireCooldown();
     TestFullAmmoRefillIsNotSold();
     TestGameOverLetsDyingZombiesFinishFalling();

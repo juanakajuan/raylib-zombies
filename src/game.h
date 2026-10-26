@@ -14,6 +14,7 @@
 #define START_POINTS 500
 #define PLAYER_BASE_HEALTH 100.0f
 #define PERK_MAX_HEALTH 250.0f
+#define QUICK_HANDS_RELOAD_SCALE 0.5f
 #define PLAYER_EYE_HEIGHT 1.7f
 #define PLAYER_RADIUS 0.4f
 #define ZOMBIE_RADIUS 0.4f
@@ -222,6 +223,7 @@ int GameAliveZombies(const GameState *g);
 int GameNearestInteractable(const GameState *g);
 InteractionInfo GameDescribeInteractable(const GameState *g, int index);
 bool PlayerHasPerk(const Player *p, PerkId id);
+float ReloadDuration(const Player *p, WeaponId id);
 Vector3 PlayerEye(const Player *p);
 Vector3 PlayerForward(const Player *p);
 BoundingBox ZombieBodyBox(const Zombie *z);

@@ -95,6 +95,8 @@ const Interactable LEVEL_INTERACTABLES[] = {
     {INTERACT_WALL_BUY, {{9.88f, 0.9f, 6.6f}, {10.0f, 2.3f, 9.4f}}, false, 2.6f, WEAPON_SHOTGUN},
     {INTERACT_DOOR, DOOR_BOX, false, 3.0f, 0},
     {INTERACT_PERK, {{8.4f, 0.0f, 12.7f}, {10.0f, 2.4f, 14.0f}}, true, 2.6f, PERK_VITALITY},
+    /* Flush with the west wall and the partition, like the first perk, so no zombie can hide on its far side. */
+    {INTERACT_PERK, {{-10.0f, 0.0f, -1.7f}, {-8.4f, 2.4f, -0.3f}}, true, 2.6f, PERK_QUICK_HANDS},
 };
 const int LEVEL_INTERACTABLE_COUNT = (int)(sizeof LEVEL_INTERACTABLES / sizeof LEVEL_INTERACTABLES[0]);
 
@@ -335,13 +337,19 @@ static void FireWeapon(GameState *g)
     }
 }
 
+float ReloadDuration(const Player *p, WeaponId id)
+{
+    float scale = PlayerHasPerk(p, PERK_QUICK_HANDS) ? QUICK_HANDS_RELOAD_SCALE : 1.0f;
+    return WEAPONS[id].reload_time * scale;
+}
+
 static void StartReload(GameState *g)
 {
     Player *p = &g->player;
     const WeaponSlot *slot = &p->slots[p->active];
     const WeaponDef *w = &WEAPONS[slot->id];
     if (p->reload_timer > 0.0f || slot->mag >= w->mag_size || slot->reserve <= 0) return;
-    p->reload_timer = w->reload_time;
+    p->reload_timer = ReloadDuration(p, slot->id);
     PushEvent(g, EVENT_RELOAD, (int)slot->id);
 }
 
