@@ -7,15 +7,15 @@ desynced KWin's input path. A game run without --mute played on the user's speak
 Use the verify skill (`zv launch`), which mutes the game and runs a private headless
 gamescope on its own bus.
 
-The launch check reads shell words, not a full shell grammar. It finds the game when it
-is the command of a simple command, or any word after a launcher such as gamescope, gdb
-or timeout, also inside `bash -c`. It ignores heredoc bodies, comments and quoted text.
+The launch check scans shell text in one pass, not with a full shell grammar. It finds the
+game when it is the command of a simple command, or any word after a launcher such as
+gamescope, gdb or timeout. It also checks `bash -c` scripts, `$(...)`, and heredocs fed to a
+shell. Other heredoc bodies, comments and quoted text are data.
 Run with --selftest to check the rules.
 """
 
 import json
 import re
-import shlex
 import sys
 
 ZV = "Use `zv launch` (.claude/skills/verify/bin/zv), which mutes the game and runs a private headless gamescope"
@@ -27,75 +27,211 @@ RULES: list[tuple[str, str]] = [
 ]
 
 # The program to run follows these words, after their options. Any game word after one counts as a launch.
-LAUNCHERS = {"env", "exec", "nohup", "setsid", "nice", "ionice", "stdbuf", "timeout", "time", "xvfb-run",
-             "dbus-run-session", "gamescope", "strace", "ltrace", "valgrind", "gdb", "perf", "taskset", "mangohud",
-             "prime-run", "script", "bash", "sh", "source", "."}
+SHELLS = {"bash", "sh", "zsh", "fish", "dash"}
+LAUNCHERS = SHELLS | {
+    "env", "exec", "nohup", "setsid", "nice", "ionice", "chrt", "taskset", "stdbuf", "unbuffer", "timeout", "time",
+    "xvfb-run", "dbus-run-session", "gamescope", "cage", "weston", "xterm", "konsole", "systemd-run", "firejail",
+    "gamemoderun", "mangohud", "prime-run", "script", "source", ".", "gdb", "lldb", "rr", "strace", "ltrace",
+    "valgrind", "heaptrack", "perf", "catchsegv", "apitrace", "renderdoccmd", "hyperfine",
+}
 KEYWORDS = {"then", "do", "else", "elif", "if", "while", "until", "!", "{"}
-ASSIGNMENT = re.compile(r"\w+=.*")
-GAME = re.compile(r"\S*/zombies|(\S*/)?run\.sh")
-MUTE_VAR = re.compile(r"ZOMBIES_MUTE=(?!0?$).*")
-SEPARATOR = re.compile(r"[;&|()\n]+")
+ASSIGNMENT = re.compile(r"\w+=.*", re.DOTALL)
+GAME = re.compile(r"(.*/)?run\.sh|.*/zombies", re.DOTALL)
+MUTE_VAR = re.compile(r"ZOMBIES_MUTE=(?!0?$).*", re.DOTALL)
+DELIMITER = re.compile(r"[ \t]*(['\"]?)([^\s'\";&|()<>]+)\1")
+
+# Code found inside a command: its text, the index of the simple command it belongs to, and whether it always runs.
+# A heredoc body runs only when that simple command is a shell.
+Nested = tuple[str, int, bool]
 
 
-def lex(text: str) -> list[str]:
-    lexer = shlex.shlex(text, posix=True, punctuation_chars=";&|()<>")
-    lexer.whitespace_split = True
-    return list(lexer)
+def scan(t: str, i: int = 0, closer: bool = False) -> tuple[list[list[str]], list[Nested], int]:
+    """Split shell text into simple commands of unquoted words, one pass.
 
-
-def words_of(command: str) -> list[str]:
-    """Shell words, one line at a time. A line with an open quote joins the next. Heredoc bodies are dropped."""
-    words: list[str] = []
-    delimiters: list[str] = []
-    pending = ""
-    for line in command.split("\n"):
-        if delimiters:
-            if line.strip() == delimiters[0]:
-                delimiters.pop(0)
-            continue
-        pending = f"{pending}\n{line}" if pending else line
-        try:
-            line_words = lex(pending)
-        except ValueError:
-            continue
-        pending = ""
-        delimiters += [after.lstrip("-") for word, after in zip(line_words, line_words[1:]) if word == "<<"]
-        words += [*line_words, "\n"]
-    return words + pending.split()
-
-
-def simple_commands(command: str) -> list[list[str]]:
+    Handles quotes, backslash line joins, comments, heredocs, `$(...)`, backticks and process
+    substitution. With closer set, stops at the `)` that ends a `$(` and returns its index.
+    """
     segments: list[list[str]] = [[]]
-    for word in words_of(command):
-        if SEPARATOR.fullmatch(word):
+    nested: list[Nested] = []
+    heredocs: list[tuple[str, bool, int]] = []
+    word: list[str] | None = None
+    depth = 0
+    n = len(t)
+
+    def add(text: str) -> None:
+        nonlocal word
+        if word is None:
+            word = []
+        word.append(text)
+
+    def end_word() -> None:
+        nonlocal word
+        if word is not None:
+            segments[-1].append("".join(word))
+            word = None
+
+    def new_segment() -> None:
+        end_word()
+        if segments[-1]:
             segments.append([])
+
+    def substitution(start: int) -> int:
+        _, _, end = scan(t, start, closer=True)
+        nested.append((t[start:end], len(segments) - 1, True))
+        return end
+
+    def arithmetic_end(start: int) -> int:
+        end = t.find("))", start)
+        return n if end < 0 else end + 2
+
+    def read_double(i: int) -> tuple[str, int]:
+        out: list[str] = []
+        while i < n:
+            c = t[i]
+            if c == '"':
+                return "".join(out), i + 1
+            if c == "\\":
+                out.append(t[i + 1:i + 2])
+                i += 2
+            elif t.startswith("$((", i):
+                end = arithmetic_end(i + 3)
+                out.append(t[i:end])
+                i = end
+            elif t.startswith("$(", i):
+                end = substitution(i + 2)
+                out.append(t[i:end + 1])
+                i = end + 1
+            elif c == "`":
+                end = t.find("`", i + 1)
+                end = n if end < 0 else end
+                nested.append((t[i + 1:end], len(segments) - 1, True))
+                i = end + 1
+            else:
+                out.append(c)
+                i += 1
+        return "".join(out), n
+
+    while i < n:
+        c = t[i]
+        if c == "\\":
+            if t[i + 1:i + 2] != "\n":
+                add(t[i + 1:i + 2])
+            i += 2
+        elif c == "'":
+            end = t.find("'", i + 1)
+            end = n if end < 0 else end
+            add(t[i + 1:end])
+            i = end + 1
+        elif t.startswith("$'", i):
+            end = i + 2
+            while end < n and t[end] != "'":
+                end += 2 if t[end] == "\\" else 1
+            add(t[i + 2:end])
+            i = end + 1
+        elif c == '"':
+            text, i = read_double(i + 1)
+            add(text)
+        elif c == "`":
+            end = t.find("`", i + 1)
+            end = n if end < 0 else end
+            nested.append((t[i + 1:end], len(segments) - 1, True))
+            add(t[i:end + 1])
+            i = end + 1
+        elif t.startswith("$((", i):
+            end = arithmetic_end(i + 3)
+            add(t[i:end])
+            i = end
+        elif t.startswith(("$(", "<(", ">("), i):
+            end = substitution(i + 2)
+            add(t[i:end + 1])
+            i = end + 1
+        elif c == "#" and word is None:
+            end = t.find("\n", i)
+            i = n if end < 0 else end
+        elif c in " \t\r":
+            end_word()
+            i += 1
+        elif c == "\n":
+            new_segment()
+            i += 1
+            for delimiter, strip, index in heredocs:
+                start = i
+                while i < n:
+                    end = t.find("\n", i)
+                    end = n if end < 0 else end
+                    line = t[i:end]
+                    i = min(n, end + 1)
+                    if (line.lstrip("\t") if strip else line) == delimiter:
+                        nested.append((t[start:end - len(line)], index, False))
+                        break
+                else:
+                    nested.append((t[start:], index, False))
+            heredocs = []
+        elif c == ")" and closer and depth == 0:
+            end_word()
+            return segments, nested, i
+        elif c in "()":
+            new_segment()
+            depth = max(0, depth + (1 if c == "(" else -1))
+            i += 1
+        elif t.startswith(("&>", ">&", "<&"), i):
+            end_word()
+            i += 2
+        elif c in ";&|":
+            new_segment()
+            i += 1
+        elif t.startswith("<<<", i):
+            end_word()
+            i += 3
+        elif t.startswith("<<", i):
+            end_word()
+            strip = t.startswith("<<-", i)
+            match = DELIMITER.match(t, i + 2 + strip)
+            if match:
+                heredocs.append((match[2], strip, len(segments) - 1))
+                i = match.end()
+            else:
+                i += 2 + strip
+        elif c in "<>":
+            end_word()
+            i += 1
         else:
-            segments[-1].append(word)
-    return [segment for segment in segments if segment]
+            add(c)
+            i += 1
+    end_word()
+    return segments, nested, n
+
+
+def command_words(segment: list[str]) -> list[str]:
+    i = 0
+    while i < len(segment) and (ASSIGNMENT.fullmatch(segment[i]) or segment[i] in KEYWORDS):
+        i += 1
+    return segment[i:]
+
+
+def program(words: list[str]) -> str:
+    return words[0].rsplit("/", 1)[-1] if words and words[0] != "." else "".join(words[:1])
 
 
 def unmuted_launch(command: str, muted: bool = False) -> bool:
     """True when a simple command starts the game, directly or after a launcher word, with no mute for it."""
-    segments = simple_commands(command)
-    muted = muted or any(MUTE_VAR.fullmatch(word) for segment in segments if segment[0] == "export" for word in segment)
-    for segment in segments:
-        i = 0
-        while i < len(segment) and (ASSIGNMENT.fullmatch(segment[i]) or segment[i] in KEYWORDS):
-            i += 1
-        segment_muted = muted or "--mute" in segment or any(MUTE_VAR.fullmatch(word) for word in segment)
-        rest = [word.strip("`") for word in segment[i:]]
-        if not rest:
+    segments, nested, _ = scan(command)
+    muted = muted or any(MUTE_VAR.fullmatch(word) for segment in segments if segment[:1] == ["export"] for word in segment)
+    segment_muted = [muted or "--mute" in segment or any(MUTE_VAR.fullmatch(word) for word in segment)
+                     for segment in segments]
+    for text, index, always_runs in nested:
+        if (always_runs or program(command_words(segments[index])) in SHELLS) and unmuted_launch(text, segment_muted[index]):
+            return True
+    for segment, segment_is_muted in zip(segments, segment_muted):
+        words = command_words(segment)
+        if not words:
             continue
-        program = rest[0].rsplit("/", 1)[-1] if rest[0] != "." else "."
-        if program in LAUNCHERS:
-            if program in ("bash", "sh"):
-                for flag, script in zip(rest, rest[1:]):
-                    if flag.startswith("-") and flag.endswith("c") and unmuted_launch(script, segment_muted):
-                        return True
-            launches = any(GAME.fullmatch(word) for word in rest[1:])
-        else:
-            launches = GAME.fullmatch(rest[0]) is not None
-        if launches and not segment_muted:
+        if program(words) in LAUNCHERS:
+            if not segment_is_muted and any(GAME.fullmatch(word) for word in words[1:]):
+                return True
+            if any(" " in word and unmuted_launch(word, segment_is_muted) for word in words[1:]):
+                return True
+        elif GAME.fullmatch(words[0]) and not segment_is_muted:
             return True
     return False
 
@@ -104,7 +240,11 @@ def block_reason(command: str) -> str | None:
     for pattern, reason in RULES:
         if re.search(pattern, command):
             return f"{reason}. Use .claude/skills/verify/bin/zv (private headless gamescope) instead."
-    if unmuted_launch(command):
+    try:
+        launch = unmuted_launch(command)
+    except RecursionError:
+        return "this command nests too deep to check for a game launch. Split it into smaller commands."
+    if launch:
         return f"this runs build/zombies without --mute or ZOMBIES_MUTE=1, so it can play audio on the user's speakers. {ZV}."
     return None
 
@@ -150,6 +290,23 @@ SELFTEST: list[tuple[str, bool]] = [
     (". ./run.sh --smoke", True),
     ("source run.sh", True),
     ("/usr/bin/gamescope -- ./build/zombies", True),
+    ("timeout 5 bash -c './build/zombies --smoke'", True),
+    ("timeout 30 sh -c 'cd build && ./zombies --windowed'", True),
+    ("dbus-run-session -- bash -c 'gamescope --backend headless -- ./build/zombies'", True),
+    ("nohup sh -c './run.sh --smoke' > /tmp/log 2>&1 &", True),
+    ("gamescope --backend headless -W 1920 -H 1080 \\\n  -- ./build/zombies --smoke", True),
+    ("cmake --build build -j4 && \\\n./build/zombies --smoke", True),
+    ("bash <<'EOF'\ncd build\n./zombies --smoke\nEOF", True),
+    ("bash -s <<EOF\n./build/zombies --smoke\nEOF", True),
+    ("rg -n '<<' .claude/hooks/guard-desktop.py\n./build/zombies --smoke", True),
+    ("lldb -- ./build/zombies --smoke", True),
+    ("fish -c './build/zombies --smoke'", True),
+    ("hyperfine './build/zombies --smoke'", True),
+    ('"$(git rev-parse --show-toplevel)/build/zombies" --smoke', True),
+    ("sed -i s#foo#bar#g src/x.c && ./build/zombies --smoke", True),
+    ("git commit -m \"$(cat <<'EOF'\nfix: support 27\" monitors\nEOF\n)\"\n./build/zombies --smoke", True),
+    ("echo $(./build/zombies --smoke)", True),
+    ("./build/zombies --smoke 2>&1 | tee log", True),
     ("{ ./build/zombies; }", True),
     ("if true; then ./build/zombies; fi", True),
     ("while :; do ./build/zombies; done", True),
@@ -176,6 +333,13 @@ SELFTEST: list[tuple[str, bool]] = [
     ("watch -n1 ls -l build/zombies", False),
     ("sudo cp build/zombies /usr/local/bin/", False),
     ("command -v ./build/zombies", False),
+    ("ZOMBIES_MUTE=1 \\\n  ./build/zombies --smoke", False),
+    ("./build/zombies --smoke \\\n  --mute", False),
+    ("./build/zombies 2>&1 --mute | tee log", False),
+    ("git commit -m \"$(cat <<'EOF'\nfix: support 27\" monitors\n\n./build/zombies --smoke now mutes\nEOF\n)\"", False),
+    ("gh pr comment 26 --body \"$(cat <<'EOF'\nRun ./build/zombies --mute, not ./run.sh.\nEOF\n)\"", False),
+    ("echo $((1<<4))", False),
+    ("cat <<< './build/zombies'", False),
     ('git commit -m "first line\n\n./build/zombies now needs --mute"', False),
     ("git commit -m \"$(cat <<'EOF'\nDon't run ./build/zombies; use zv\nEOF\n)\"", False),
     ("gh pr create --body-file - <<'EOF'\n## Summary\n./run.sh is blocked, see #15\nEOF", False),
