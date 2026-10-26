@@ -338,13 +338,16 @@ def cmd_launch(args: argparse.Namespace) -> None:
            if k not in ("DISPLAY", "WAYLAND_DISPLAY", "DBUS_SESSION_BUS_ADDRESS")}
     # Hardware GL presents by buffer flips, so X GetImage returns stale frames. llvmpipe keeps them current.
     env["LIBGL_ALWAYS_SOFTWARE"] = "1"
+    # --mute keeps the audio device closed in every mode. Smoke mode does not read settings.cfg.
+    env["ZOMBIES_MUTE"] = "1"
+    game_args = ["--mute", *args.game_args]
     with (run_dir / "gamescope.log").open("w") as gs_log:
         # A private session bus: on the user's bus a nested compositor can take over their
         # KDE global shortcuts (kglobalaccel) and leave them inactive when it exits.
         gamescope = subprocess.Popen(
             ["dbus-run-session", "--",
              "gamescope", "--backend", "headless", "-W", out_w, "-H", out_h, "-w", out_w, "-h", out_h, "-r", "60",
-             "--", str(child), *args.game_args],
+             "--", str(child), *game_args],
             env=env, stdout=gs_log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True,
         )
     deadline = time.time() + args.timeout
@@ -362,7 +365,7 @@ def cmd_launch(args: argparse.Namespace) -> None:
         git_head=git("rev-parse", "HEAD"),
         git_dirty=bool(git("status", "--porcelain", "--", "src", "CMakeLists.txt")),
         binary_mtime=BINARY.stat().st_mtime,
-        game_args=list(args.game_args),
+        game_args=game_args,
         started_at=time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         output=args.output,
     )

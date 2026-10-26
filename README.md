@@ -7,7 +7,7 @@ Survive rounds of zombies, earn points by shooting them, and spend points on a d
 
 `./run.sh` builds the game if needed and then starts it. It passes its arguments to the game, as in `./run.sh --fullscreen`.
 
-The game starts in fullscreen at the monitor's native resolution. Use `--windowed` to start in a 1280x720 window on the primary monitor. `--smoke` runs a scripted session that saves three screenshots and always uses the window.
+The game starts in fullscreen at the monitor's native resolution. Use `--windowed` to start in a 1280x720 window on the primary monitor. `--smoke` runs a scripted session that saves three screenshots and always uses the window. `--mute`, or the environment variable `ZOMBIES_MUTE=1`, starts the game with no audio device.
 
 To do the steps by hand:
 

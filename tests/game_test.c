@@ -1,9 +1,12 @@
+#define _POSIX_C_SOURCE 200112L
+
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "audio.h"
 #include "game.h"
 #include "settings.h"
 
@@ -1594,6 +1597,29 @@ static void TestDebugSkipRound(void)
     CHECK(g.phase == PHASE_ROUND_ACTIVE, "skipping an intermission must start the round, phase=%d", (int)g.phase);
 }
 
+static void TestMuteFlagParsing(void)
+{
+    char program[] = "zombies";
+    char mute[] = "--mute";
+    char smoke[] = "--smoke";
+    char *neither[] = {program, smoke};
+    char *flag[] = {program, smoke, mute};
+
+    unsetenv("ZOMBIES_MUTE");
+    CHECK(!AudioMuted(2, neither), "no flag and no ZOMBIES_MUTE must not mute");
+    CHECK(AudioMuted(3, flag), "--mute must mute");
+
+    setenv("ZOMBIES_MUTE", "1", 1);
+    CHECK(AudioMuted(2, neither), "ZOMBIES_MUTE=1 must mute");
+    CHECK(AudioMuted(3, flag), "--mute with ZOMBIES_MUTE=1 must mute");
+
+    setenv("ZOMBIES_MUTE", "0", 1);
+    CHECK(!AudioMuted(2, neither), "ZOMBIES_MUTE=0 must not mute");
+    setenv("ZOMBIES_MUTE", "", 1);
+    CHECK(!AudioMuted(2, neither), "an empty ZOMBIES_MUTE must not mute");
+    unsetenv("ZOMBIES_MUTE");
+}
+
 int main(void)
 {
     TestInit();
@@ -1646,6 +1672,7 @@ int main(void)
     TestSettingsSetRatio();
     TestSettingsParse();
     TestSettingsFormatRoundTrip();
+    TestMuteFlagParsing();
 
     if (g_failures > 0) {
         fprintf(stderr, "%d of %d checks failed\n", g_failures, g_checks);
