@@ -189,16 +189,47 @@ static bool UpdateSettingsMenu(Settings *settings, SettingsMenu *menu)
     return changed;
 }
 
+typedef struct DebugMenu {
+    int selected;
+} DebugMenu;
+
+static void UpdateDebugMenu(GameState *g, DebugMenu *menu)
+{
+    Vector2 mouse = UiMousePosition();
+    menu->selected = (menu->selected + DEBUG_COMMAND_COUNT + MenuKeyPressed(KEY_DOWN) - MenuKeyPressed(KEY_UP)) % DEBUG_COMMAND_COUNT;
+    bool clicked = false;
+    if (GetMouseDelta().x != 0.0f || GetMouseDelta().y != 0.0f) {
+        for (int i = 0; i < DEBUG_COMMAND_COUNT; i++) {
+            if (CheckCollisionPointRec(mouse, DebugRowBounds(i))) menu->selected = i;
+        }
+    }
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        for (int i = 0; i < DEBUG_COMMAND_COUNT; i++) {
+            if (!CheckCollisionPointRec(mouse, DebugRowBounds(i))) continue;
+            menu->selected = i;
+            clicked = true;
+        }
+    }
+    if (clicked || IsKeyPressed(KEY_ENTER)) GameDebugApply(g, &DEBUG_COMMANDS[menu->selected]);
+}
+
+typedef enum Overlay {
+    OVERLAY_NONE,
+    OVERLAY_PAUSE,
+    OVERLAY_DEBUG,
+} Overlay;
+
 /* Pause lives here, not in GamePhase: a paused loop just stops stepping the sim. */
-static int RunGame(void)
+static int RunGame(bool debug)
 {
     GameState game;
     SimClock clock = {0};
-    bool paused = false;
+    Overlay overlay = OVERLAY_NONE;
     bool quit = false;
     int discard_look_frames = LOOK_SETTLE_FRAMES;
     Settings settings;
     SettingsMenu menu = {.selected = 0, .dragging = -1};
+    DebugMenu debug_menu = {0};
     bool settings_dirty = false;
     SettingsLoad(&settings);
     SetMasterVolume(settings.volume);
@@ -212,10 +243,12 @@ static int RunGame(void)
             SetDisplayMode(IsWindowFullscreen() ? DISPLAY_WINDOWED : DISPLAY_FULLSCREEN);
             discard_look_frames = LOOK_SETTLE_FRAMES;
         }
-        if (IsKeyPressed(KEY_ESCAPE)) {
-            paused = !paused;
+        Overlay previous = overlay;
+        if (IsKeyPressed(KEY_ESCAPE)) overlay = overlay == OVERLAY_NONE ? OVERLAY_PAUSE : OVERLAY_NONE;
+        if (debug && IsKeyPressed(KEY_F1) && overlay != OVERLAY_PAUSE) overlay = overlay == OVERLAY_NONE ? OVERLAY_DEBUG : OVERLAY_NONE;
+        if (overlay != previous) {
             clock = (SimClock){0};
-            if (paused) {
+            if (overlay != OVERLAY_NONE) {
                 EnableCursor();
             } else {
                 if (settings_dirty) SettingsSave(&settings);
@@ -224,8 +257,8 @@ static int RunGame(void)
                 discard_look_frames = LOOK_SETTLE_FRAMES;
             }
         }
-        quit = paused && IsKeyPressed(KEY_Q);
-        if (paused && UpdateSettingsMenu(&settings, &menu)) {
+        quit = overlay == OVERLAY_PAUSE && IsKeyPressed(KEY_Q);
+        if (overlay == OVERLAY_PAUSE && UpdateSettingsMenu(&settings, &menu)) {
             settings_dirty = true;
             SetMasterVolume(settings.volume);
         }
@@ -234,7 +267,8 @@ static int RunGame(void)
             discard_look_frames = LOOK_SETTLE_FRAMES;
             menu.toggle_display = false;
         }
-        if (!paused) {
+        if (overlay == OVERLAY_DEBUG) UpdateDebugMenu(&game, &debug_menu);
+        if (overlay == OVERLAY_NONE) {
             FrameInput in = ReadInput(settings.sensitivity);
             if (discard_look_frames > 0) {
                 in.look = Vector2Zero();
@@ -244,7 +278,8 @@ static int RunGame(void)
         }
         BeginDrawing();
         GameDraw(&game, settings.fov);
-        if (paused) DrawPauseOverlay(&settings, menu.selected, IsWindowFullscreen());
+        if (overlay == OVERLAY_PAUSE) DrawPauseOverlay(&settings, menu.selected, IsWindowFullscreen());
+        if (overlay == OVERLAY_DEBUG) DrawDebugOverlay(&game, debug_menu.selected);
         EndDrawing();
     }
     if (settings_dirty) SettingsSave(&settings);
@@ -395,16 +430,19 @@ static int RunSmoke(void)
 int main(int argc, char **argv)
 {
     bool smoke = false;
+    bool debug = false;
     DisplayMode mode = DISPLAY_FULLSCREEN;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--smoke") == 0) {
             smoke = true;
+        } else if (strcmp(argv[i], "--debug") == 0) {
+            debug = true;
         } else if (strcmp(argv[i], "--fullscreen") == 0) {
             mode = DISPLAY_FULLSCREEN;
         } else if (strcmp(argv[i], "--windowed") == 0) {
             mode = DISPLAY_WINDOWED;
         } else {
-            fprintf(stderr, "usage: %s [--fullscreen | --windowed] [--smoke]\n", argv[0]);
+            fprintf(stderr, "usage: %s [--fullscreen | --windowed] [--smoke] [--debug]\n", argv[0]);
             return 2;
         }
     }
@@ -416,7 +454,7 @@ int main(int argc, char **argv)
     SetDisplayMode(smoke ? DISPLAY_WINDOWED : mode);
     SetTargetFPS(TARGET_FPS);
     AudioInit();
-    int status = smoke ? RunSmoke() : RunGame();
+    int status = smoke ? RunSmoke() : RunGame(debug);
     AudioShutdown();
     CloseWindow();
     return status;

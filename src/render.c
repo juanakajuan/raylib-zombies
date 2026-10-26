@@ -291,6 +291,7 @@ static void DrawHud(const GameState *g, Camera3D camera)
         DrawCrosshair(p, width, height);
     }
 
+    if (g->god_mode) DrawTextShadow("GOD MODE", width - 170, 20, 24, (Color){255, 230, 120, 255});
     DrawTextShadow(TextFormat("%d", g->round_number), 28, height - 130, 110, blood);
     DrawTextShadow(TextFormat("%d", p->points), 190, height - 78, 44, (Color){255, 230, 120, 255});
     DrawTextShadow("POINTS", 192, height - 100, 18, (Color){255, 255, 255, 190});
@@ -409,5 +410,34 @@ void DrawPauseOverlay(const Settings *settings, int selected, bool fullscreen)
 
     DrawTextCentered("Mouse or Up/Down/Left/Right to adjust, Esc resume, F11 fullscreen, Q quit", width / 2,
                      (int)PauseRowBounds(PAUSE_ROW_COUNT).y + 30, 24, (Color){255, 230, 120, 255});
+    rlPopMatrix();
+}
+
+#define DEBUG_ROW_HEIGHT 32
+#define DEBUG_FONT_SIZE 24
+
+Rectangle DebugRowBounds(int row)
+{
+    return (Rectangle){(float)(UiWidth() / 2 - 200), (float)(90 + row * DEBUG_ROW_HEIGHT), 400.0f, (float)DEBUG_ROW_HEIGHT};
+}
+
+void DrawDebugOverlay(const GameState *g, int selected)
+{
+    int width = UiWidth(), height = UiHeight();
+    rlPushMatrix();
+    rlScalef(UiScale(), UiScale(), 1.0f);
+    DrawRectangle(0, 0, width, height, (Color){0, 0, 0, 150});
+    DrawTextCentered("DEBUG", width / 2, 20, 56, WHITE);
+
+    for (int i = 0; i < DEBUG_COMMAND_COUNT; i++) {
+        Rectangle row = DebugRowBounds(i);
+        Color color = i == selected ? (Color){255, 230, 120, 255} : (Color){255, 255, 255, 190};
+        const char *label = DEBUG_COMMANDS[i].label;
+        if (DEBUG_COMMANDS[i].kind == DEBUG_GOD_MODE) label = TextFormat("God mode: %s", g->god_mode ? "ON" : "OFF");
+        DrawTextShadow(label, (int)row.x, (int)row.y, DEBUG_FONT_SIZE, color);
+    }
+
+    DrawTextCentered("Up/Down select, Enter or click apply, F1 or Esc close", width / 2,
+                     (int)DebugRowBounds(DEBUG_COMMAND_COUNT).y + 16, 20, (Color){255, 230, 120, 255});
     rlPopMatrix();
 }

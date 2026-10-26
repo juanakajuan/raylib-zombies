@@ -208,6 +208,7 @@ typedef struct GameState {
     int player_zone;
     int kills;
     int rounds_survived;
+    bool god_mode;
     uint32_t rng_state;
     /* Filled by GameUpdate, which empties it first. The caller drains it after each step. Events past capacity are dropped. */
     GameEvent events[GAME_EVENT_CAPACITY];
@@ -222,6 +223,27 @@ bool GameInteractableVisible(const GameState *g, int index, Vector3 eye);
 int GameAliveZombies(const GameState *g);
 int GameNearestInteractable(const GameState *g);
 InteractionInfo GameDescribeInteractable(const GameState *g, int index);
+typedef enum DebugKind {
+    DEBUG_POINTS,
+    DEBUG_WEAPON,
+    DEBUG_PERK,
+    DEBUG_REFILL_AMMO,
+    DEBUG_HEAL,
+    DEBUG_GOD_MODE,
+    DEBUG_OPEN_DOORS,
+    DEBUG_SKIP_ROUND,
+} DebugKind;
+
+typedef struct DebugCommand {
+    const char *label;
+    DebugKind kind;
+    int arg; /* points, WeaponId, or PerkId, depending on kind */
+} DebugCommand;
+
+extern const DebugCommand DEBUG_COMMANDS[];
+extern const int DEBUG_COMMAND_COUNT;
+
+void GameDebugApply(GameState *g, const DebugCommand *cmd);
 bool PlayerHasPerk(const Player *p, PerkId id);
 float ReloadDuration(const Player *p, WeaponId id);
 Vector3 PlayerEye(const Player *p);

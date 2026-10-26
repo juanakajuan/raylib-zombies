@@ -11,7 +11,7 @@ Esc pauses the game: the simulation stops, the mouse is freed and a `PAUSED` ove
 - `display-menu` switches fullscreen and windowed from the `window mode` row with Left/Right or a click. It is the fourth row, so press Down three times after Esc.
 - `display-toggle` switches fullscreen and windowed with F11 and with Alt+Enter, also while paused.
 - `display-flags` starts fullscreen with `--fullscreen` and windowed with `--windowed` or no flag.
-- `display-bad-flag` prints `usage: ... [--fullscreen | --windowed] [--smoke]` and exits 2 on an unknown flag.
+- `display-bad-flag` prints `usage: ... [--fullscreen | --windowed] [--smoke] [--debug]` and exits 2 on an unknown flag.
 
 ## How to get to it (user POV)
 

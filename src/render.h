@@ -12,6 +12,8 @@ void GameDraw(const GameState *g, float fov_degrees);
 void DrawPauseOverlay(const Settings *settings, int selected, bool fullscreen);
 Rectangle PauseRowBounds(int row);
 Rectangle PauseBarBounds(int row);
+void DrawDebugOverlay(const GameState *g, int selected);
+Rectangle DebugRowBounds(int row);
 /* The mouse position in the layout units that the HUD and pause bounds use. */
 Vector2 UiMousePosition(void);
 

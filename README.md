@@ -39,6 +39,10 @@ On Linux it also needs the X11 and OpenGL development headers.
 
 The pause menu lists volume (0 to 1), mouse sensitivity (0.2x to 3x) and field of view (60 to 110 degrees). Changes apply at once and are saved to `settings.cfg` in the working directory when you resume or quit. The file is plain `key=value` text. Unknown keys are ignored and out-of-range values are clamped. `--smoke` ignores the file and uses the defaults.
 
+## Debug tools
+
+Start with `--debug` to enable the F1 menu. It freezes the game and lists cheats: +5000 points, give any weapon or perk, refill ammo, full health, god mode, open all doors and skip round. Use Up / Down and Enter, or the mouse. F1 or Esc closes it.
+
 ## Features
 
 - Rounds with an intermission countdown. Zombie count, health and speed grow each round, with sprinters from round 4.
