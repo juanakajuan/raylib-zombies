@@ -133,7 +133,7 @@ typedef struct SettingsMenu {
 /* Returns true when a setting changed. A drag keeps its row until the button is released. */
 static bool UpdateSettingsMenu(Settings *settings, SettingsMenu *menu)
 {
-    Vector2 mouse = GetMousePosition();
+    Vector2 mouse = UiMousePosition();
     bool changed = false;
     menu->selected = (menu->selected + SETTING_COUNT + MenuKeyPressed(KEY_DOWN) - MenuKeyPressed(KEY_UP)) % SETTING_COUNT;
     if (GetMouseDelta().x != 0.0f || GetMouseDelta().y != 0.0f) {
