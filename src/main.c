@@ -210,7 +210,7 @@ static void UpdateDebugMenu(GameState *g, DebugMenu *menu)
             clicked = true;
         }
     }
-    if (clicked || IsKeyPressed(KEY_ENTER)) GameDebugApply(g, &DEBUG_COMMANDS[menu->selected]);
+    if (clicked || (IsKeyPressed(KEY_ENTER) && !DisplayTogglePressed())) GameDebugApply(g, &DEBUG_COMMANDS[menu->selected]);
 }
 
 typedef enum Overlay {
@@ -267,7 +267,7 @@ static int RunGame(bool debug)
             discard_look_frames = LOOK_SETTLE_FRAMES;
             menu.toggle_display = false;
         }
-        if (overlay == OVERLAY_DEBUG) UpdateDebugMenu(&game, &debug_menu);
+        if (overlay == OVERLAY_DEBUG && previous == OVERLAY_DEBUG) UpdateDebugMenu(&game, &debug_menu);
         if (overlay == OVERLAY_NONE) {
             FrameInput in = ReadInput(settings.sensitivity);
             if (discard_look_frames > 0) {
