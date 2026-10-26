@@ -60,6 +60,7 @@ Each command sends real input to the game window. They return when the input is 
 | `zv key r --repeat 3 --gap 0.2` | Tap a key several times. |
 | `zv click --count 3` | Fire. Default 0.35 s between clicks (M1911 fires every 0.28 s, semi-automatic). |
 | `zv click --hold 2.0` | Hold fire (automatic MP5K). |
+| `zv wheel down` / `zv wheel up` | Scroll one notch. Down selects the next weapon, up the previous. |
 | `zv look 90` / `zv look -45 10` | Turn the view by degrees: yaw positive right, pitch positive up. Exact: one mouse pixel is 0.0022 rad. |
 | `zv window` | Print the window size and `mode windowed` or `mode fullscreen`. Read-only. |
 | `zv zombies` | List zombie heads visible on screen (pixel position and size). Read-only. |

@@ -7,7 +7,7 @@ Esc pauses the game: the simulation stops, the mouse is freed and a `PAUSED` ove
 - `pause-toggle` shows and hides the `PAUSED` overlay with Esc.
 - `pause-freezes` stops the countdown, zombies and regeneration while paused.
 - `pause-settings` changes the selected setting with Left/Right or by clicking and dragging its bar, moves the selection with Up/Down, and writes `settings.cfg` on resume. A fresh launch reads it back.
-- `pause-quit` exits the game with Q while paused. Q while not paused swaps weapons instead.
+- `pause-quit` exits the game with Q while paused. Q while not paused does nothing.
 - `display-menu` switches fullscreen and windowed from the `window mode` row with Left/Right or a click. It is the fourth row, so press Down three times after Esc.
 - `display-toggle` switches fullscreen and windowed with F11 and with Alt+Enter, also while paused.
 - `display-flags` starts fullscreen with `--fullscreen` and windowed with `--windowed` or no flag.

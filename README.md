@@ -29,7 +29,7 @@ On Linux it also needs the X11 and OpenGL development headers.
 | Left mouse | Fire |
 | R | Reload (restart on the game over screen) |
 | E | Buy or interact |
-| Q | Swap weapon |
+| 1, 2 or mouse wheel | Select weapon |
 | Shift | Sprint |
 | Esc | Pause and free the mouse. Esc again resumes, Q quits while paused |
 | Mouse, or Up / Down, Left / Right | While paused: hover or click a setting row and drag its bar, or select and change it with the arrows |

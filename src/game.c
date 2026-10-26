@@ -377,8 +377,14 @@ static void UpdateWeapon(GameState *g, const FrameInput *in, float dt)
         }
     }
 
-    if (in->swap_pressed && p->slot_count > 1) {
-        p->active = (p->active + 1) % p->slot_count;
+    int target = p->active;
+    if (in->select_slot >= 1 && in->select_slot <= p->slot_count) {
+        target = in->select_slot - 1;
+    } else if (in->cycle_steps != 0) {
+        target = ((p->active + in->cycle_steps) % p->slot_count + p->slot_count) % p->slot_count;
+    }
+    if (target != p->active) {
+        p->active = target;
         p->reload_timer = 0.0f;
         p->fire_cooldown = fmaxf(p->fire_cooldown, SWAP_TIME);
     }

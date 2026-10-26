@@ -562,7 +562,8 @@ static void TestWeaponsAndPerk(void)
     int shotgun_item = FindInteractable(INTERACT_WALL_BUY, WEAPON_SHOTGUN);
     int perk_item = FindInteractable(INTERACT_PERK, PERK_VITALITY);
     FrameInput interact = {.interact_pressed = true};
-    FrameInput swap = {.swap_pressed = true};
+    FrameInput select_first = {.select_slot = 1};
+    FrameInput select_second = {.select_slot = 2};
     FrameInput idle = {0};
     GameState g = NewActiveGame();
 
@@ -580,11 +581,11 @@ static void TestWeaponsAndPerk(void)
           "SMG ammo=%d/%d", g.player.slots[1].mag, g.player.slots[1].reserve);
 
     for (int i = 0; i < 20; i++) Press(&g, idle);
-    Press(&g, swap);
-    CHECK(g.player.active == 0, "swap should select the pistol, active=%d", g.player.active);
+    Press(&g, select_first);
+    CHECK(g.player.active == 0, "key 1 should select the pistol, active=%d", g.player.active);
     for (int i = 0; i < 30; i++) Press(&g, idle);
-    Press(&g, swap);
-    CHECK(g.player.active == 1, "swap should return to the SMG, active=%d", g.player.active);
+    Press(&g, select_second);
+    CHECK(g.player.active == 1, "key 2 should return to the SMG, active=%d", g.player.active);
 
     Zombie *target = PlaceZombie(&g, (Vector3){0.0f, 0.0f, 4.0f}, 9000.0f);
     g.player.pos = (Vector3){0.0f, 0.0f, 10.0f};
@@ -718,7 +719,7 @@ static void TestSwapCannotShortenTheFireCooldown(void)
     g.player.slot_count = 2;
     g.player.active = 1;
     FrameInput fire = {.fire_pressed = true};
-    FrameInput swap = {.swap_pressed = true};
+    FrameInput swap = {.cycle_steps = 1};
 
     Press(&g, fire);
     int shells = g.player.slots[1].mag;
@@ -739,6 +740,35 @@ static void TestSwapCannotShortenTheFireCooldown(void)
     Press(&idle, swap);
     Press(&idle, fire);
     CHECK(idle.player.slots[1].mag == WEAPONS[WEAPON_SHOTGUN].mag_size, "a weapon must not fire on the frame it is drawn");
+}
+
+static void TestWeaponSelectionInput(void)
+{
+    FrameInput idle = {0};
+    GameState g = NewActiveGame();
+    g.player.slots[1] = (WeaponSlot){WEAPON_SHOTGUN, WEAPONS[WEAPON_SHOTGUN].mag_size, WEAPONS[WEAPON_SHOTGUN].reserve_max};
+    g.player.slot_count = 2;
+
+    Press(&g, (FrameInput){.cycle_steps = 1});
+    CHECK(g.player.active == 1, "wheel down should select the next weapon, active=%d", g.player.active);
+    Press(&g, (FrameInput){.cycle_steps = 1});
+    CHECK(g.player.active == 0, "wheel down past the last slot should wrap to the first, active=%d", g.player.active);
+    Press(&g, (FrameInput){.cycle_steps = -1});
+    CHECK(g.player.active == 1, "wheel up from the first slot should wrap to the last, active=%d", g.player.active);
+    Press(&g, (FrameInput){.select_slot = 3});
+    CHECK(g.player.active == 1, "a number key for an empty slot must not switch, active=%d", g.player.active);
+
+    for (int i = 0; i < 30; i++) Press(&g, idle);
+    g.player.slots[1].mag = 0;
+    Press(&g, (FrameInput){.reload_pressed = true});
+    CHECK(g.player.reload_timer > 0.0f, "reload should start");
+    Press(&g, (FrameInput){.select_slot = 2});
+    CHECK(g.player.reload_timer > 0.0f, "selecting the weapon in hand must not cancel its reload");
+
+    GameState lone = NewActiveGame();
+    Press(&lone, (FrameInput){.cycle_steps = 1});
+    Press(&lone, (FrameInput){.select_slot = 2});
+    CHECK(lone.player.active == 0, "with one weapon nothing should switch, active=%d", lone.player.active);
 }
 
 static void TestFullAmmoRefillIsNotSold(void)
@@ -1199,6 +1229,7 @@ int main(void)
     TestQuickHandsPerk();
     TestQuickHandsCannotTrapZombies();
     TestSwapCannotShortenTheFireCooldown();
+    TestWeaponSelectionInput();
     TestFullAmmoRefillIsNotSold();
     TestGameOverLetsDyingZombiesFinishFalling();
     TestPlayerCannotWalkThroughZombies();

@@ -310,7 +310,8 @@ static void DrawHud(const GameState *g, Camera3D camera)
     DrawTextShadow(TextFormat("%d / %d", slot->mag, slot->reserve), width - 300, height - 86, 56,
                    slot->mag == 0 ? blood : (Color){255, 255, 255, 255});
     if (p->slot_count > 1) {
-        DrawTextShadow(TextFormat("[Q] %s", WEAPONS[p->slots[1 - p->active].id].name), width - 300, height - 146, 18, (Color){255, 255, 255, 150});
+        int other = 1 - p->active;
+        DrawTextShadow(TextFormat("[%d] %s", other + 1, WEAPONS[p->slots[other].id].name), width - 300, height - 146, 18, (Color){255, 255, 255, 150});
     }
     if (p->reload_timer > 0.0f) DrawTextShadow("RELOADING", width - 300, height - 180, 24, (Color){255, 220, 90, 255});
 
