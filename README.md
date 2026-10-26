@@ -44,7 +44,7 @@ The pause menu lists volume (0 to 1), mouse sensitivity (0.2x to 3x) and field o
 
 ## Debug tools
 
-Start with `--debug` to enable the F1 menu. It freezes the game and lists cheats: +5000 points, give any weapon or perk, refill ammo, full health, god mode, open all doors and skip round. Use Up / Down and Enter, or the mouse. F1 or Esc closes it.
+Start with `--debug` to enable the F1 menu. It freezes the game and lists cheats: +5000 points, give any weapon or perk, refill ammo, full health, god mode, open all doors and skip round. Use Up / Down and Enter, or the mouse. F1 or Esc closes it. `--debug` also logs each sound that plays.
 
 ## Features
 

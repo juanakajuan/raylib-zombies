@@ -354,7 +354,7 @@ static const Zombie *SmokeNearestZombie(const GameState *g)
 static int SmokeWeaponItem(WeaponId id)
 {
     for (int i = 0; i < LEVEL_INTERACTABLE_COUNT; i++) {
-        if (LEVEL_INTERACTABLES[i].kind == INTERACT_WALL_BUY && LEVEL_INTERACTABLES[i].payload == (int)id) return i;
+        if (LEVEL_INTERACTABLES[i].kind == INTERACT_WALL_BUY && LEVEL_INTERACTABLES[i].weapon == id) return i;
     }
     return -1;
 }
@@ -461,6 +461,7 @@ int main(int argc, char **argv)
             return 2;
         }
     }
+    if (debug) SetTraceLogLevel(LOG_DEBUG);
     /* The window starts hidden so the compositor places it, and picks its workspace, on the primary monitor. */
     SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE | FLAG_WINDOW_HIDDEN);
     InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Zombies");
