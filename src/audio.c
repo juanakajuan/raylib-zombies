@@ -196,16 +196,16 @@ static float Denied(Synth *s, float t)
     [SOUND_FIRE_##id] = fire_sound, [SOUND_RELOAD_##id] = reload_sound,
 static const SoundDef SOUNDS[SOUND_COUNT] = {
     WEAPON_LIST(SOUND_DEF_ROWS)
-    [SOUND_HIT] = {0.12f, 0.5f, Hit},
-    [SOUND_KILL] = {0.35f, 0.7f, Kill},
-    [SOUND_HEADSHOT_KILL] = {0.35f, 0.8f, HeadshotKill},
-    [SOUND_GROWL] = {0.9f, 0.5f, Growl, {"growl_1.wav", "growl_2.wav", "growl_3.wav"}},
-    [SOUND_ZOMBIE_ATTACK] = {0.4f, 0.7f, ZombieAttack, {"attack_1.wav", "attack_2.wav", "attack_3.wav"}},
-    [SOUND_PLAYER_DAMAGE] = {0.45f, 0.9f, PlayerDamage},
-    [SOUND_ROUND_START] = {1.2f, 0.7f, RoundStart},
-    [SOUND_ROUND_END] = {1.4f, 0.7f, RoundEnd},
-    [SOUND_PURCHASE] = {0.5f, 0.6f, Purchase},
-    [SOUND_DENIED] = {0.3f, 0.3f, Denied},
+    [SOUND_HIT] = {.seconds = 0.12f, .volume = 0.5f, .synth = Hit},
+    [SOUND_KILL] = {.seconds = 0.35f, .volume = 0.7f, .synth = Kill},
+    [SOUND_HEADSHOT_KILL] = {.seconds = 0.35f, .volume = 0.8f, .synth = HeadshotKill},
+    [SOUND_GROWL] = {.seconds = 0.9f, .volume = 0.5f, .synth = Growl, .files = {"growl_1.wav", "growl_2.wav", "growl_3.wav"}},
+    [SOUND_ZOMBIE_ATTACK] = {.seconds = 0.4f, .volume = 0.7f, .synth = ZombieAttack, .files = {"attack_1.wav", "attack_2.wav", "attack_3.wav"}},
+    [SOUND_PLAYER_DAMAGE] = {.seconds = 0.45f, .volume = 0.9f, .synth = PlayerDamage},
+    [SOUND_ROUND_START] = {.seconds = 1.2f, .volume = 0.7f, .synth = RoundStart},
+    [SOUND_ROUND_END] = {.seconds = 1.4f, .volume = 0.7f, .synth = RoundEnd},
+    [SOUND_PURCHASE] = {.seconds = 0.5f, .volume = 0.6f, .synth = Purchase},
+    [SOUND_DENIED] = {.seconds = 0.3f, .volume = 0.3f, .synth = Denied},
 };
 
 /* Samples are scaled so the loudest one reaches PEAK, so each synth function needs no gain tuning. */

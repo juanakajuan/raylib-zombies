@@ -7,6 +7,13 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cc: [gcc, clang]
+    name: build-and-test (${{ matrix.cc }})
+    env:
+      CC: ${{ matrix.cc }}
     steps:
       - uses: actions/checkout@v4
 
