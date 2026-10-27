@@ -37,36 +37,25 @@
 #define GROWL_STAGGER 0.7f
 #define GROWL_STAGGER_SLOTS 7
 
-const WeaponDef WEAPONS[WEAPON_COUNT] = {
-    [WEAPON_PISTOL] = {
-        .name = "M1911", .damage = 40.0f, .fire_interval = 0.28f, .automatic = false,
-        .mag_size = 8, .reserve_max = 96, .reload_time = 1.4f,
-        .pellets = 1, .spread = 0.0f, .wall_cost = 0,
+#define WEAPON_DEF_ROW(id, name_, damage_, fire_interval_, automatic_, mag_size_, reserve_max_, reload_time_, pellets_, \
+                       spread_, wall_cost_, ...) \
+    [WEAPON_##id] = { \
+        .name = name_, .damage = damage_, .fire_interval = fire_interval_, .automatic = automatic_, \
+        .mag_size = mag_size_, .reserve_max = reserve_max_, .reload_time = reload_time_, \
+        .pellets = pellets_, .spread = spread_, .wall_cost = wall_cost_, \
     },
-    [WEAPON_SMG] = {
-        .name = "MP5K", .damage = 30.0f, .fire_interval = 0.085f, .automatic = true,
-        .mag_size = 32, .reserve_max = 192, .reload_time = 1.8f,
-        .pellets = 1, .spread = 0.012f, .wall_cost = 1000,
-    },
-    [WEAPON_SHOTGUN] = {
-        .name = "Shotgun", .damage = 26.0f, .fire_interval = 0.8f, .automatic = false,
-        .mag_size = 6, .reserve_max = 54, .reload_time = 2.4f,
-        .pellets = 6, .spread = 0.055f, .wall_cost = 1500,
-    },
-};
+const WeaponDef WEAPONS[WEAPON_COUNT] = {WEAPON_LIST(WEAPON_DEF_ROW)};
 
-const PerkDef PERKS[PERK_COUNT] = {
-    [PERK_VITALITY] = {"Vitality Brew", 2500},
-    [PERK_QUICK_HANDS] = {"Quick Hands", 3000},
-};
+#define PERK_DEF_ROW(id, name_, cost_, max_health_, reload_scale_, ...) \
+    [PERK_##id] = {.name = name_, .cost = cost_, .max_health = max_health_, .reload_scale = reload_scale_},
+const PerkDef PERKS[PERK_COUNT] = {PERK_LIST(PERK_DEF_ROW)};
 
+#define DEBUG_WEAPON_ROW(id, name, ...) {"Give " name, DEBUG_WEAPON, WEAPON_##id},
+#define DEBUG_PERK_ROW(id, name, ...) {"Give " name, DEBUG_PERK, PERK_##id},
 const DebugCommand DEBUG_COMMANDS[] = {
     {"+5000 points", DEBUG_POINTS, 5000},
-    {"Give M1911", DEBUG_WEAPON, WEAPON_PISTOL},
-    {"Give MP5K", DEBUG_WEAPON, WEAPON_SMG},
-    {"Give Shotgun", DEBUG_WEAPON, WEAPON_SHOTGUN},
-    {"Give Vitality Brew", DEBUG_PERK, PERK_VITALITY},
-    {"Give Quick Hands", DEBUG_PERK, PERK_QUICK_HANDS},
+    WEAPON_LIST(DEBUG_WEAPON_ROW)
+    PERK_LIST(DEBUG_PERK_ROW)
     {"Refill ammo", DEBUG_REFILL_AMMO, 0},
     {"Full health", DEBUG_HEAL, 0},
     {"God mode", DEBUG_GOD_MODE, 0},
@@ -115,12 +104,12 @@ const SpawnPoint LEVEL_SPAWNS[] = {
 const int LEVEL_SPAWN_COUNT = (int)(sizeof LEVEL_SPAWNS / sizeof LEVEL_SPAWNS[0]);
 
 const Interactable LEVEL_INTERACTABLES[] = {
-    {INTERACT_WALL_BUY, {{-10.0f, 0.9f, 5.6f}, {-9.88f, 2.3f, 8.4f}}, false, 2.6f, WEAPON_SMG},
-    {INTERACT_WALL_BUY, {{9.88f, 0.9f, 6.6f}, {10.0f, 2.3f, 9.4f}}, false, 2.6f, WEAPON_SHOTGUN},
-    {INTERACT_DOOR, DOOR_BOX, false, 3.0f, 0},
-    {INTERACT_PERK, {{8.4f, 0.0f, 12.7f}, {10.0f, 2.4f, 14.0f}}, true, 2.6f, PERK_VITALITY},
+    {INTERACT_WALL_BUY, {{-10.0f, 0.9f, 5.6f}, {-9.88f, 2.3f, 8.4f}}, false, 2.6f, .weapon = WEAPON_SMG},
+    {INTERACT_WALL_BUY, {{9.88f, 0.9f, 6.6f}, {10.0f, 2.3f, 9.4f}}, false, 2.6f, .weapon = WEAPON_SHOTGUN},
+    {INTERACT_DOOR, DOOR_BOX, false, 3.0f, .door = 0},
+    {INTERACT_PERK, {{8.4f, 0.0f, 12.7f}, {10.0f, 2.4f, 14.0f}}, true, 2.6f, .perk = PERK_VITALITY},
     /* Flush with the west wall and the partition, like the first perk, so no zombie can hide on its far side. */
-    {INTERACT_PERK, {{-10.0f, 0.0f, -1.7f}, {-8.4f, 2.4f, -0.3f}}, true, 2.6f, PERK_QUICK_HANDS},
+    {INTERACT_PERK, {{-10.0f, 0.0f, -1.7f}, {-8.4f, 2.4f, -0.3f}}, true, 2.6f, .perk = PERK_QUICK_HANDS},
 };
 const int LEVEL_INTERACTABLE_COUNT = (int)(sizeof LEVEL_INTERACTABLES / sizeof LEVEL_INTERACTABLES[0]);
 
@@ -407,7 +396,10 @@ static void FireWeapon(GameState *g)
 
 float ReloadDuration(const Player *p, WeaponId id)
 {
-    float scale = PlayerHasPerk(p, PERK_QUICK_HANDS) ? QUICK_HANDS_RELOAD_SCALE : 1.0f;
+    float scale = 1.0f;
+    for (int i = 0; i < PERK_COUNT; i++) {
+        if (PlayerHasPerk(p, (PerkId)i)) scale *= PERKS[i].reload_scale;
+    }
     return WEAPONS[id].reload_time * scale;
 }
 
@@ -745,7 +737,7 @@ InteractionInfo GameDescribeInteractable(const GameState *g, int index)
     InteractionInfo info = {0};
     switch (it->kind) {
     case INTERACT_WALL_BUY: {
-        WeaponId id = (WeaponId)it->payload;
+        WeaponId id = it->weapon;
         const WeaponSlot *owned = OwnedSlot(&g->player, id);
         info.active = owned == NULL || owned->mag < WEAPONS[id].mag_size || owned->reserve < WEAPONS[id].reserve_max;
         info.cost = WEAPONS[id].wall_cost;
@@ -754,13 +746,13 @@ InteractionInfo GameDescribeInteractable(const GameState *g, int index)
         break;
     }
     case INTERACT_DOOR:
-        info.active = !g->zone_open[LEVEL_DOORS[it->payload].opens_zone];
-        info.cost = LEVEL_DOORS[it->payload].cost;
+        info.active = !g->zone_open[LEVEL_DOORS[it->door].opens_zone];
+        info.cost = LEVEL_DOORS[it->door].cost;
         info.verb = "open";
         info.subject = "the door";
         break;
     case INTERACT_PERK: {
-        PerkId id = (PerkId)it->payload;
+        PerkId id = it->perk;
         info.active = !PlayerHasPerk(&g->player, id);
         info.cost = PERKS[id].cost;
         info.verb = "drink";
@@ -774,9 +766,9 @@ InteractionInfo GameDescribeInteractable(const GameState *g, int index)
 static void GrantPerk(GameState *g, PerkId id)
 {
     g->player.perks |= (uint8_t)(1u << id);
-    if (id == PERK_VITALITY) {
-        g->player.max_health = PERK_MAX_HEALTH;
-        g->player.health = PERK_MAX_HEALTH;
+    if (PERKS[id].max_health > 0.0f) {
+        g->player.max_health = PERKS[id].max_health;
+        g->player.health = PERKS[id].max_health;
     }
 }
 
@@ -784,13 +776,13 @@ static void ApplyInteraction(GameState *g, const Interactable *it)
 {
     switch (it->kind) {
     case INTERACT_WALL_BUY:
-        GiveWeapon(&g->player, (WeaponId)it->payload);
+        GiveWeapon(&g->player, it->weapon);
         break;
     case INTERACT_DOOR:
-        g->zone_open[LEVEL_DOORS[it->payload].opens_zone] = true;
+        g->zone_open[LEVEL_DOORS[it->door].opens_zone] = true;
         break;
     case INTERACT_PERK:
-        GrantPerk(g, (PerkId)it->payload);
+        GrantPerk(g, it->perk);
         break;
     }
 }

@@ -24,13 +24,11 @@ static const Color FLOOR_FRONT[2] = {{94, 86, 78, 255}, {78, 71, 64, 255}};
 static const Color FLOOR_BACK[2] = {{68, 78, 92, 255}, {56, 64, 78, 255}};
 static const Color DOOR_COLOR = {150, 62, 44, 255};
 static const Color PLANK_COLOR = {112, 82, 52, 255};
+#define PERK_LOOK_ROW(id, name, cost, max_health, reload_scale, body, glow) [PERK_##id] = {body, glow},
 static const struct {
     Color body;
     Color glow;
-} PERK_LOOK[PERK_COUNT] = {
-    [PERK_VITALITY] = {{46, 118, 214, 255}, {255, 232, 150, 255}},
-    [PERK_QUICK_HANDS] = {{222, 108, 36, 255}, {150, 255, 160, 255}},
-};
+} PERK_LOOK[PERK_COUNT] = {PERK_LIST(PERK_LOOK_ROW)};
 static const Color SKIN = {104, 132, 98, 255};
 static const Color SHIRT = {82, 66, 58, 255};
 static const Color PANTS = {52, 58, 76, 255};
@@ -44,16 +42,12 @@ static const Color DAMAGE_BODY = {255, 255, 255, 255};
 static const Color DAMAGE_HEADSHOT = {255, 220, 60, 255};
 static const Color DAMAGE_KILL = {255, 120, 70, 255};
 
-static const Color WEAPON_PANEL[WEAPON_COUNT] = {
-    [WEAPON_PISTOL] = {150, 150, 150, 255},
-    [WEAPON_SMG] = {226, 140, 40, 255},
-    [WEAPON_SHOTGUN] = {196, 52, 52, 255},
-};
-static const float WEAPON_VIEW_LENGTH[WEAPON_COUNT] = {
-    [WEAPON_PISTOL] = 0.12f,
-    [WEAPON_SMG] = 0.18f,
-    [WEAPON_SHOTGUN] = 0.22f,
-};
+#define WEAPON_PANEL_ROW(id, name, damage, fire_interval, automatic, mag_size, reserve_max, reload_time, pellets, \
+                         spread, wall_cost, view_length, panel, ...) [WEAPON_##id] = panel,
+#define WEAPON_VIEW_ROW(id, name, damage, fire_interval, automatic, mag_size, reserve_max, reload_time, pellets, \
+                        spread, wall_cost, view_length, ...) [WEAPON_##id] = view_length,
+static const Color WEAPON_PANEL[WEAPON_COUNT] = {WEAPON_LIST(WEAPON_PANEL_ROW)};
+static const float WEAPON_VIEW_LENGTH[WEAPON_COUNT] = {WEAPON_LIST(WEAPON_VIEW_ROW)};
 
 static Color Shade(Color color, float factor)
 {
@@ -116,18 +110,18 @@ static void DrawInteractable(const GameState *g, const Interactable *it)
     switch (it->kind) {
     case INTERACT_WALL_BUY:
         DrawBox(center, Vector3Add(size, (Vector3){-0.03f, 0.14f, 0.14f}), Shade(WALL_WIRE, 1.2f));
-        DrawSolidBox(it->box, WEAPON_PANEL[it->payload]);
+        DrawSolidBox(it->box, WEAPON_PANEL[it->weapon]);
         break;
     case INTERACT_DOOR:
-        if (g->zone_open[LEVEL_DOORS[it->payload].opens_zone]) break;
+        if (g->zone_open[LEVEL_DOORS[it->door].opens_zone]) break;
         DrawSolidBox(it->box, DOOR_COLOR);
         DrawCubeWiresV(center, size, WALL_WIRE);
         DrawBox((Vector3){center.x, 0.9f, center.z}, (Vector3){size.x + 0.1f, 0.2f, size.z + 0.16f}, PLANK_COLOR);
         DrawBox((Vector3){center.x, 2.3f, center.z}, (Vector3){size.x + 0.1f, 0.2f, size.z + 0.16f}, PLANK_COLOR);
         break;
     case INTERACT_PERK: {
-        Color glow = PERK_LOOK[it->payload].glow;
-        DrawSolidBox(it->box, PERK_LOOK[it->payload].body);
+        Color glow = PERK_LOOK[it->perk].glow;
+        DrawSolidBox(it->box, PERK_LOOK[it->perk].body);
         DrawCubeWiresV(center, size, WALL_WIRE);
         DrawBox((Vector3){center.x, it->box.max.y + 0.08f, center.z}, (Vector3){size.x + 0.1f, 0.16f, size.z + 0.1f}, glow);
         DrawBox((Vector3){center.x, 1.4f, it->box.min.z - 0.02f}, (Vector3){size.x * 0.7f, 0.9f, 0.06f}, glow);

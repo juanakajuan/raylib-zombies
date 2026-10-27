@@ -10,13 +10,11 @@
 #define PEAK 0.85f
 #define TWO_PI (2.0f * PI)
 
+#define SOUND_FIRE_ID_ROW(id, ...) SOUND_FIRE_##id,
+#define SOUND_RELOAD_ID_ROW(id, ...) SOUND_RELOAD_##id,
 typedef enum SoundId {
-    SOUND_FIRE_PISTOL,
-    SOUND_FIRE_SMG,
-    SOUND_FIRE_SHOTGUN,
-    SOUND_RELOAD_PISTOL,
-    SOUND_RELOAD_SMG,
-    SOUND_RELOAD_SHOTGUN,
+    WEAPON_LIST(SOUND_FIRE_ID_ROW)
+    WEAPON_LIST(SOUND_RELOAD_ID_ROW)
     SOUND_HIT,
     SOUND_KILL,
     SOUND_HEADSHOT_KILL,
@@ -51,10 +49,6 @@ typedef struct VoiceBank {
     int next_variant;
     int next_voice[MAX_VARIANTS];
 } VoiceBank;
-
-_Static_assert(WEAPON_PISTOL == 0, "fire and reload sounds are indexed by WeaponId");
-_Static_assert(SOUND_RELOAD_PISTOL - SOUND_FIRE_PISTOL == WEAPON_COUNT, "one fire sound per weapon, in WeaponId order");
-_Static_assert(SOUND_HIT - SOUND_RELOAD_PISTOL == WEAPON_COUNT, "one reload sound per weapon, in WeaponId order");
 
 static VoiceBank g_bank[SOUND_COUNT];
 static bool g_ready = false;
@@ -197,13 +191,11 @@ static float Denied(Synth *s, float t)
     return 0.7f * Square(110.0f, t) * (t < 0.28f ? 1.0f : 0.0f) * fminf(1.0f, t * 200.0f) * Decay(t, 2.0f);
 }
 
+#define SOUND_DEF_ROWS(id, name, damage, fire_interval, automatic, mag_size, reserve_max, reload_time, pellets, \
+                       spread, wall_cost, view_length, panel, fire_sound, reload_sound) \
+    [SOUND_FIRE_##id] = fire_sound, [SOUND_RELOAD_##id] = reload_sound,
 static const SoundDef SOUNDS[SOUND_COUNT] = {
-    [SOUND_FIRE_PISTOL] = {0.25f, 0.8f, FirePistol, {"fire_pistol.wav"}},
-    [SOUND_FIRE_SMG] = {0.12f, 0.6f, FireSmg, {"fire_smg.wav"}},
-    [SOUND_FIRE_SHOTGUN] = {0.6f, 1.0f, FireShotgun, {"fire_shotgun.wav"}},
-    [SOUND_RELOAD_PISTOL] = {0.95f, 0.6f, Reload, {"reload_pistol.wav"}},
-    [SOUND_RELOAD_SMG] = {0.95f, 0.6f, Reload, {"reload_smg.wav"}},
-    [SOUND_RELOAD_SHOTGUN] = {0.95f, 0.6f, Reload, {"reload_shotgun.wav"}},
+    WEAPON_LIST(SOUND_DEF_ROWS)
     [SOUND_HIT] = {0.12f, 0.5f, Hit},
     [SOUND_KILL] = {0.35f, 0.7f, Kill},
     [SOUND_HEADSHOT_KILL] = {0.35f, 0.8f, HeadshotKill},
@@ -288,14 +280,19 @@ void AudioInit(bool muted)
     for (int i = 0; i < SOUND_COUNT; i++) LoadBank((SoundId)i);
 }
 
+#define FIRE_SOUND_ROW(id, ...) [WEAPON_##id] = SOUND_FIRE_##id,
+#define RELOAD_SOUND_ROW(id, ...) [WEAPON_##id] = SOUND_RELOAD_##id,
+static const SoundId FIRE_SOUND[WEAPON_COUNT] = {WEAPON_LIST(FIRE_SOUND_ROW)};
+static const SoundId RELOAD_SOUND[WEAPON_COUNT] = {WEAPON_LIST(RELOAD_SOUND_ROW)};
+
 static bool SoundFor(const GameEvent *event, SoundId *out)
 {
     switch (event->kind) {
     case EVENT_FIRE:
-        *out = (SoundId)(SOUND_FIRE_PISTOL + event->arg);
+        *out = FIRE_SOUND[event->arg];
         return true;
     case EVENT_RELOAD:
-        *out = (SoundId)(SOUND_RELOAD_PISTOL + event->arg);
+        *out = RELOAD_SOUND[event->arg];
         return true;
     case EVENT_HIT: *out = SOUND_HIT; return true;
     case EVENT_KILL: *out = SOUND_KILL; return true;
@@ -314,7 +311,10 @@ static bool SoundFor(const GameEvent *event, SoundId *out)
 void AudioPlayEvent(const GameEvent *event)
 {
     SoundId id;
-    if (!g_ready || !SoundFor(event, &id)) return;
+    if (!SoundFor(event, &id)) return;
+    const char *file = SOUNDS[id].files[0];
+    TraceLog(LOG_DEBUG, "AUDIO: t=%.3f sound=%d %s", GetTime(), (int)id, file != NULL ? file : "synth");
+    if (!g_ready) return;
     VoiceBank *bank = &g_bank[id];
     int variant = bank->next_variant;
     PlaySound(bank->voices[variant][bank->next_voice[variant]]);

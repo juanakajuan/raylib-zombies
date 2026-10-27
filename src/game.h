@@ -6,6 +6,8 @@
 
 #include "raylib.h"
 
+#include "content.h"
+
 #define MAX_ZOMBIES 32
 #define MAX_ALIVE_ZOMBIES 24
 #define MAX_SLOTS 2
@@ -52,10 +54,9 @@ typedef enum GamePhase {
     PHASE_GAME_OVER,
 } GamePhase;
 
+#define WEAPON_ID_ROW(id, ...) WEAPON_##id,
 typedef enum WeaponId {
-    WEAPON_PISTOL,
-    WEAPON_SMG,
-    WEAPON_SHOTGUN,
+    WEAPON_LIST(WEAPON_ID_ROW)
     WEAPON_COUNT,
 } WeaponId;
 
@@ -80,15 +81,17 @@ typedef struct WeaponSlot {
     int reserve;
 } WeaponSlot;
 
+#define PERK_ID_ROW(id, ...) PERK_##id,
 typedef enum PerkId {
-    PERK_VITALITY,
-    PERK_QUICK_HANDS,
+    PERK_LIST(PERK_ID_ROW)
     PERK_COUNT,
 } PerkId;
 
 typedef struct PerkDef {
     const char *name;
     int cost;
+    float max_health; /* above 0 sets the maximum health and heals to it */
+    float reload_scale; /* multiplies every reload time */
 } PerkDef;
 
 extern const PerkDef PERKS[PERK_COUNT];
@@ -102,6 +105,7 @@ typedef struct Player {
     float health;
     float max_health;
     uint8_t perks; /* bit PerkId is set once that perk is bought */
+    _Static_assert(PERK_COUNT <= 8, "Player.perks has one bit per perk");
     float time_since_damage;
     int points;
     WeaponSlot slots[MAX_SLOTS];
@@ -164,7 +168,11 @@ typedef struct Interactable {
     BoundingBox box;
     bool solid;
     float radius;
-    int payload; /* weapon id, door index, or PerkId */
+    union { /* the member that kind names */
+        WeaponId weapon;
+        int door; /* index into LEVEL_DOORS */
+        PerkId perk;
+    };
 } Interactable;
 
 typedef struct InteractionInfo {

@@ -459,10 +459,26 @@ static void TestZombiesCannotHitThroughThePartition(void)
     CHECK(!hit_through_wall, "a zombie in the back room hurt a player in the front room");
 }
 
-static int FindInteractable(InteractKind kind, int payload)
+static int FindWallBuy(WeaponId id)
 {
     for (int i = 0; i < LEVEL_INTERACTABLE_COUNT; i++) {
-        if (LEVEL_INTERACTABLES[i].kind == kind && (payload < 0 || LEVEL_INTERACTABLES[i].payload == payload)) return i;
+        if (LEVEL_INTERACTABLES[i].kind == INTERACT_WALL_BUY && LEVEL_INTERACTABLES[i].weapon == id) return i;
+    }
+    return -1;
+}
+
+static int FindPerk(PerkId id)
+{
+    for (int i = 0; i < LEVEL_INTERACTABLE_COUNT; i++) {
+        if (LEVEL_INTERACTABLES[i].kind == INTERACT_PERK && LEVEL_INTERACTABLES[i].perk == id) return i;
+    }
+    return -1;
+}
+
+static int FindDoor(void)
+{
+    for (int i = 0; i < LEVEL_INTERACTABLE_COUNT; i++) {
+        if (LEVEL_INTERACTABLES[i].kind == INTERACT_DOOR) return i;
     }
     return -1;
 }
@@ -493,8 +509,8 @@ static void Press(GameState *g, FrameInput in)
 
 static void TestDoor(void)
 {
-    int door_item = FindInteractable(INTERACT_DOOR, -1);
-    const Door *door = &LEVEL_DOORS[LEVEL_INTERACTABLES[door_item].payload];
+    int door_item = FindDoor();
+    const Door *door = &LEVEL_DOORS[LEVEL_INTERACTABLES[door_item].door];
     Vector3 door_center = BoxCenter(door->box);
     FrameInput interact = {.interact_pressed = true};
     FrameInput fire = {.fire_pressed = true};
@@ -561,9 +577,9 @@ static void TestDoor(void)
 
 static void TestWeaponsAndPerk(void)
 {
-    int smg_item = FindInteractable(INTERACT_WALL_BUY, WEAPON_SMG);
-    int shotgun_item = FindInteractable(INTERACT_WALL_BUY, WEAPON_SHOTGUN);
-    int perk_item = FindInteractable(INTERACT_PERK, PERK_VITALITY);
+    int smg_item = FindWallBuy(WEAPON_SMG);
+    int shotgun_item = FindWallBuy(WEAPON_SHOTGUN);
+    int perk_item = FindPerk(PERK_VITALITY);
     FrameInput interact = {.interact_pressed = true};
     FrameInput select_first = {.select_slot = 1};
     FrameInput select_second = {.select_slot = 2};
@@ -661,7 +677,7 @@ static int FramesToReload(GameState *g)
 
 static void TestQuickHandsPerk(void)
 {
-    int item = FindInteractable(INTERACT_PERK, PERK_QUICK_HANDS);
+    int item = FindPerk(PERK_QUICK_HANDS);
     CHECK(item >= 0, "the level must hold a Quick Hands machine");
     if (item < 0) return;
     CHECK(InBackRoom(item), "Quick Hands belongs behind the door");
@@ -699,7 +715,7 @@ static void TestQuickHandsPerk(void)
 
 static void TestQuickHandsCannotTrapZombies(void)
 {
-    int item = FindInteractable(INTERACT_PERK, PERK_QUICK_HANDS);
+    int item = FindPerk(PERK_QUICK_HANDS);
     if (item < 0) return;
     int reached = 0;
     int runs = 0;
@@ -776,7 +792,7 @@ static void TestWeaponSelectionInput(void)
 
 static void TestFullAmmoRefillIsNotSold(void)
 {
-    int smg_item = FindInteractable(INTERACT_WALL_BUY, WEAPON_SMG);
+    int smg_item = FindWallBuy(WEAPON_SMG);
     FrameInput interact = {.interact_pressed = true};
     FrameInput fire = {.fire_held = true};
     FrameInput idle = {0};
@@ -1082,7 +1098,7 @@ static void TestZombiesNeverStackOnThePlayer(void)
 static const char *InteractableName(int index)
 {
     switch (LEVEL_INTERACTABLES[index].kind) {
-    case INTERACT_WALL_BUY: return WEAPONS[LEVEL_INTERACTABLES[index].payload].name;
+    case INTERACT_WALL_BUY: return WEAPONS[LEVEL_INTERACTABLES[index].weapon].name;
     case INTERACT_DOOR: return "door";
     case INTERACT_PERK: return "perk";
     }
@@ -1129,7 +1145,7 @@ static void TestPartitionHidesTheFrontRoomFromTheBackRoom(void)
 
 static void TestDoorwayControlsTheViewIntoTheFrontRoom(void)
 {
-    int perk_item = FindInteractable(INTERACT_PERK, PERK_VITALITY);
+    int perk_item = FindPerk(PERK_VITALITY);
     Vector3 lined_up = {-3.0f, PLAYER_EYE_HEIGHT, -3.0f};
     GameState g = NewActiveGame();
 
@@ -1350,8 +1366,8 @@ static void TestRoundEvents(void)
 
 static void TestPurchaseEvents(void)
 {
-    int door_item = FindInteractable(INTERACT_DOOR, -1);
-    int cost = LEVEL_DOORS[LEVEL_INTERACTABLES[door_item].payload].cost;
+    int door_item = FindDoor();
+    int cost = LEVEL_DOORS[LEVEL_INTERACTABLES[door_item].door].cost;
     FrameInput interact = {.interact_pressed = true};
     GameState g = NewActiveGame();
     StandNear(&g, door_item);
