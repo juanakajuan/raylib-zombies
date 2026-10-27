@@ -70,7 +70,7 @@ int main(void)
     bool all_alive = true;
     for (Motion motion = MOTION_STILL; motion <= MOTION_CIRCLE; motion++) {
         double us_per_step[BENCH_RUNS];
-        double worst_us = 0.0;
+        double run_worst_us[BENCH_RUNS];
         double worst_p999_us = 0.0;
         long floods = 0;
         for (int run = 0; run < BENCH_RUNS; run++) {
@@ -91,15 +91,17 @@ int main(void)
             us_per_step[run] = total / BENCH_STEPS;
             qsort(step_us, BENCH_STEPS, sizeof step_us[0], CompareDoubles);
             double p999_us = step_us[BENCH_STEPS - BENCH_STEPS / 1000];
-            if (step_us[BENCH_STEPS - 1] > worst_us) worst_us = step_us[BENCH_STEPS - 1];
+            run_worst_us[run] = step_us[BENCH_STEPS - 1];
             if (p999_us > worst_p999_us) worst_p999_us = p999_us;
             printf("scenario=%s run=%d us_per_step=%.3f p999_us=%.1f worst_us=%.1f\n", MOTION_NAMES[motion], run + 1, us_per_step[run], p999_us,
                    step_us[BENCH_STEPS - 1]);
         }
         qsort(us_per_step, BENCH_RUNS, sizeof us_per_step[0], CompareDoubles);
-        printf("scenario=%s median_us_per_step=%.3f p999_us=%.1f worst_us=%.1f floods_per_run=%ld alive_zombies=%d steps=%d runs=%d\n",
-               MOTION_NAMES[motion], us_per_step[BENCH_RUNS / 2], worst_p999_us, worst_us, floods / BENCH_RUNS, AliveZombies(&g), BENCH_STEPS,
-               BENCH_RUNS);
+        qsort(run_worst_us, BENCH_RUNS, sizeof run_worst_us[0], CompareDoubles);
+        printf("scenario=%s median_us_per_step=%.3f p999_us=%.1f median_run_worst_us=%.1f max_worst_us=%.1f floods_per_run=%ld alive_zombies=%d steps=%d "
+               "runs=%d\n",
+               MOTION_NAMES[motion], us_per_step[BENCH_RUNS / 2], worst_p999_us, run_worst_us[BENCH_RUNS / 2], run_worst_us[BENCH_RUNS - 1],
+               floods / BENCH_RUNS, AliveZombies(&g), BENCH_STEPS, BENCH_RUNS);
         all_alive = all_alive && AliveZombies(&g) == MAX_ALIVE_ZOMBIES;
     }
 
