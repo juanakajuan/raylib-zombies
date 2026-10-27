@@ -299,9 +299,7 @@ static int settle_events;
 
 static void StepFrame(void)
 {
-    DisplayStepResult step = DisplayStep(reconciler, DisplayReadFacts());
-    reconciler = step.next;
-    if (step.event == DISPLAY_EVENT_SENT) DisplayApply(step.command);
+    DisplayStepResult step = DisplayUpdate(&reconciler);
     if (step.event == DISPLAY_EVENT_SETTLED || step.event == DISPLAY_EVENT_GAVE_UP) settle_events++;
 }
 
@@ -319,7 +317,7 @@ static const char *SettledProblem(bool reconciled, WindowMode target)
     if (!SameSize(hud, rl.render)) return "HUD size differs from the framebuffer";
     if (!SameSize(rl.screen, rl.render)) return "screen size differs from the framebuffer (world labels off)";
     if (wm.modes[0].width != m.width) return "monitor video mode changed";
-    if (reconciled && !reconciler.settled) return "reconciler not settled";
+    if (reconciled && reconciler.phase != DISPLAY_SETTLED) return "reconciler not settled";
     if (reconciled && settle_events != 1) return "reconciler did not settle exactly once";
     return NULL;
 }
@@ -365,12 +363,80 @@ static Outcome Run(const Scenario *s, int column)
     return o;
 }
 
+/* A window manager that never applies the command: the step sends at most DISPLAY_MAX_ATTEMPTS commands, reports
+ * one give-up, and still settles when the window gets there late. */
+static int ExpectStep(bool ok, const char *what)
+{
+    if (!ok) fprintf(stderr, "FAIL %s\n", what);
+    return ok ? 0 : 1;
+}
+
+static DisplayStepResult SettleWindowed(PixelRect primary)
+{
+    DisplayReconciler r = DisplayReconcilerInit(WINDOW_MODE_WINDOWED, (PixelSize){WINDOW_WIDTH, WINDOW_HEIGHT});
+    WindowFacts f = {.window = {primary.x, primary.y, WINDOW_WIDTH, WINDOW_HEIGHT}, .primary = primary};
+    return DisplayStep(r, f);
+}
+
+/* Direct DisplayStep cases that no fake-window scenario reaches. */
+static int CheckStepRules(void)
+{
+    int failures = 0;
+    PixelRect right = MONITOR_RECTS[1];
+    DisplayStepResult place = SettleWindowed(right);
+    failures += ExpectStep(place.event == DISPLAY_EVENT_SENT && place.command.kind == DISPLAY_PLACE_WINDOW &&
+                               place.command.rect.x == right.x + (right.width - WINDOW_WIDTH) / 2 &&
+                               place.command.rect.y == right.y + (right.height - WINDOW_HEIGHT) / 2,
+                           "the windowed goal is centred on a primary monitor that is not at 0,0");
+
+    PixelRect centred = place.command.rect;
+    DisplayStepResult settled = DisplayStep(place.next, (WindowFacts){.window = centred, .primary = right});
+    WindowFacts moved = {.window = {centred.x + 50, centred.y + 30, WINDOW_WIDTH, WINDOW_HEIGHT}, .primary = right};
+    DisplayStepResult after_move = DisplayStep(settled.next, moved);
+    failures += ExpectStep(settled.event == DISPLAY_EVENT_SETTLED && after_move.event == DISPLAY_EVENT_NONE,
+                           "a window that the user moves after it settles stays where the user put it");
+
+    DisplayReconciler r = DisplayReconcilerInit(WINDOW_MODE_FULLSCREEN, (PixelSize){WINDOW_WIDTH, WINDOW_HEIGHT});
+    WindowFacts stuck = {.window = {0, 0, WINDOW_WIDTH, WINDOW_HEIGHT}, .primary = MONITOR_RECTS[0]};
+    for (int frame = 0; frame < 200; frame++) r = DisplayStep(r, stuck).next;
+    DisplayStepResult retarget = DisplayStep(DisplaySetTarget(r, WINDOW_MODE_FULLSCREEN), stuck);
+    failures += ExpectStep(r.phase == DISPLAY_GAVE_UP && retarget.event == DISPLAY_EVENT_SENT,
+                           "a new target after a give-up sends again");
+    return failures;
+}
+
+static int CheckGiveUpThenLateSettle(void)
+{
+    DisplayReconciler r = DisplayReconcilerInit(WINDOW_MODE_FULLSCREEN, (PixelSize){WINDOW_WIDTH, WINDOW_HEIGHT});
+    WindowFacts stuck = {.fullscreen_flag = false, .window = {0, 0, WINDOW_WIDTH, WINDOW_HEIGHT}, .primary = MONITOR_RECTS[0]};
+    int sent = 0, gave_up = 0;
+    for (int frame = 0; frame < 1000; frame++) {
+        DisplayStepResult step = DisplayStep(r, stuck);
+        r = step.next;
+        sent += step.event == DISPLAY_EVENT_SENT;
+        gave_up += step.event == DISPLAY_EVENT_GAVE_UP;
+    }
+    WindowFacts arrived = {.fullscreen_flag = true, .window = MONITOR_RECTS[0], .primary = MONITOR_RECTS[0]};
+    DisplayStepResult late = DisplayStep(r, arrived);
+    int failures = 0;
+    if (sent != DISPLAY_MAX_ATTEMPTS || gave_up != 1) {
+        failures++;
+        fprintf(stderr, "FAIL stuck window: %d commands and %d give-ups, expected %d and 1\n", sent, gave_up, DISPLAY_MAX_ATTEMPTS);
+    }
+    if (late.event != DISPLAY_EVENT_SETTLED || late.next.phase != DISPLAY_SETTLED) {
+        failures++;
+        fprintf(stderr, "FAIL late window after a give-up does not settle\n");
+    }
+    return failures;
+}
+
 int main(void)
 {
     const WmRules gamescope = {.delay = 1};
     const WmRules kde = {.delay = 1, .ignore_after_leave = 2, .restore_maximized = true};
     const WmRules kde_slow = {.delay = 2, .ignore_after_leave = 5, .restore_maximized = true};
-    /* Columns: 34e62c9 511968a d34415e da9ccd2 trunk DisplayStep. Each fix commit is the first that passes its row. */
+    /* Columns: 34e62c9 511968a d34415e da9ccd2 trunk DisplayStep. S1 to S4 each name the commit that fixed their bug.
+     * The version before that commit fails the row. */
     const Scenario scenarios[] = {
         {"S1 start fullscreen, window opened on monitor 1 (fix 511968a)", {.delay = 1, .open_monitor = 1},
          WINDOW_MODE_FULLSCREEN, {NONE}, {false, false, true, true, true, true}},
@@ -388,7 +454,7 @@ int main(void)
          {true, false, true, false, true, true}},
         {"S8 S2 with delay 4", {.delay = 4}, WINDOW_MODE_WINDOWED, {TOGGLE, TOGGLE}, {true, false, true, true, true, true}},
     };
-    int failures = 0;
+    int failures = CheckGiveUpThenLateSettle() + CheckStepRules();
     printf("%-72s", "scenario (cell = settled result / transient frames)");
     for (int v = 0; v < LEGACY_COUNT; v++) printf(" %-9s", LEGACY_VERSIONS[v].sha);
     printf(" %-9s\n", "step");

@@ -22,13 +22,11 @@ static void DisplayApply(DisplayCommand c)
 {
     switch (c.kind) {
     case DISPLAY_ENTER_FULLSCREEN:
-        if (!IsWindowFullscreen()) {
-            /* ToggleFullscreen asks GLFW for fullscreen at raylib's stored screen size. Without this resize GLFW
-             * switches the monitor video mode to 1280x720, and the screen size that the world labels use stays
-             * 1280x720 on a 1920x1080 framebuffer. */
-            SetWindowSize(c.rect.width, c.rect.height);
-            ToggleFullscreen();
-        }
+        /* ToggleFullscreen asks GLFW for fullscreen at raylib's stored screen size. Without this resize, GLFW
+         * switches the monitor video mode to 1280x720. Also, raylib does not update its screen size in fullscreen.
+         * Thus only this call keeps the screen size of the world labels equal to the framebuffer. */
+        SetWindowSize(c.rect.width, c.rect.height);
+        if (!IsWindowFullscreen()) ToggleFullscreen();
         SetWindowMonitor(0);
         return;
     case DISPLAY_LEAVE_FULLSCREEN:
@@ -39,6 +37,16 @@ static void DisplayApply(DisplayCommand c)
         SetWindowPosition(c.rect.x, c.rect.y);
         return;
     }
+}
+
+/* Reads the facts only while the reconciler is not settled: each read costs X server round trips. */
+static DisplayStepResult DisplayUpdate(DisplayReconciler *r)
+{
+    if (r->phase == DISPLAY_SETTLED) return (DisplayStepResult){.next = *r};
+    DisplayStepResult step = DisplayStep(*r, DisplayReadFacts());
+    *r = step.next;
+    if (step.event == DISPLAY_EVENT_SENT) DisplayApply(step.command);
+    return step;
 }
 
 #endif

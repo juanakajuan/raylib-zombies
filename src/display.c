@@ -12,7 +12,7 @@ DisplayReconciler DisplaySetTarget(DisplayReconciler r, WindowMode target)
     r.wait_frames = 0;
     r.attempts = 0;
     r.place_pending = target == WINDOW_MODE_WINDOWED;
-    r.settled = false;
+    r.phase = DISPLAY_CHANGING;
     return r;
 }
 
@@ -31,17 +31,16 @@ static DisplayStepResult Send(DisplayReconciler r, DisplayCommandKind kind, Pixe
 {
     r.wait_frames = 1 << r.attempts;
     r.attempts++;
-    r.settled = false;
     return (DisplayStepResult){.next = r, .event = DISPLAY_EVENT_SENT, .command = {kind, rect}};
 }
 
-static DisplayStepResult Settle(DisplayReconciler r, DisplayEvent event)
+static DisplayStepResult Settle(DisplayReconciler r)
 {
-    DisplayStepResult result = {.next = r, .event = r.settled ? DISPLAY_EVENT_NONE : event};
-    result.next.settled = true;
+    DisplayStepResult result = {.next = r, .event = r.phase == DISPLAY_SETTLED ? DISPLAY_EVENT_NONE : DISPLAY_EVENT_SETTLED};
+    result.next.phase = DISPLAY_SETTLED;
     result.next.place_pending = false;
     result.next.wait_frames = 0;
-    if (event == DISPLAY_EVENT_SETTLED) result.next.attempts = 0;
+    result.next.attempts = 0;
     return result;
 }
 
@@ -51,12 +50,16 @@ DisplayStepResult DisplayStep(DisplayReconciler r, WindowFacts f)
     PixelRect goal = want_fullscreen ? f.primary : CentredWindow(f.primary, r.windowed_size);
     bool flag_matches = f.fullscreen_flag == want_fullscreen;
     bool placed = want_fullscreen ? SameRect(f.window, goal) : !r.place_pending || f.maximized || SameRect(f.window, goal);
-    if (flag_matches && placed) return Settle(r, DISPLAY_EVENT_SETTLED);
+    if (flag_matches && placed) return Settle(r);
+    if (r.phase == DISPLAY_GAVE_UP) return (DisplayStepResult){.next = r};
     if (r.wait_frames > 0) {
         r.wait_frames--;
         return (DisplayStepResult){.next = r};
     }
+    if (r.attempts >= DISPLAY_MAX_ATTEMPTS) {
+        r.phase = DISPLAY_GAVE_UP;
+        return (DisplayStepResult){.next = r, .event = DISPLAY_EVENT_GAVE_UP};
+    }
     if (!flag_matches) return Send(r, want_fullscreen ? DISPLAY_ENTER_FULLSCREEN : DISPLAY_LEAVE_FULLSCREEN, f.primary);
-    if (r.attempts >= DISPLAY_MAX_ATTEMPTS) return Settle(r, DISPLAY_EVENT_GAVE_UP);
     return Send(r, want_fullscreen ? DISPLAY_ENTER_FULLSCREEN : DISPLAY_PLACE_WINDOW, goal);
 }

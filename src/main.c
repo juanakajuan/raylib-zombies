@@ -48,14 +48,17 @@ static void AdvanceSim(GameState *g, SimClock *clock, const FrameInput *fresh, f
 
 static const char *const WINDOW_MODE_NAMES[] = {"windowed", "fullscreen"};
 static const char *const DISPLAY_COMMAND_NAMES[] = {"enter-fullscreen", "leave-fullscreen", "place-window"};
+_Static_assert(sizeof WINDOW_MODE_NAMES / sizeof WINDOW_MODE_NAMES[0] == WINDOW_MODE_FULLSCREEN + 1, "one name per mode");
+_Static_assert(sizeof DISPLAY_COMMAND_NAMES / sizeof DISPLAY_COMMAND_NAMES[0] == DISPLAY_COMMAND_KIND_COUNT,
+               "one name per command");
 
-/* Returns true when it sent a window command. zv reads the "display mode=" lines from the game log. */
+/* Returns true on a frame that sends a window command or settles. zv reads the "display mode=" lines from the
+ * game log. */
 static bool ReconcileDisplay(DisplayReconciler *display, long frame)
 {
-    WindowFacts facts = DisplayReadFacts();
-    DisplayStepResult step = DisplayStep(*display, facts);
-    *display = step.next;
-    PixelRect w = facts.window;
+    DisplayStepResult step = DisplayUpdate(display);
+    Vector2 position = GetWindowPosition();
+    PixelRect w = {(int)position.x, (int)position.y, GetRenderWidth(), GetRenderHeight()};
     switch (step.event) {
     case DISPLAY_EVENT_NONE:
         return false;
@@ -63,7 +66,6 @@ static bool ReconcileDisplay(DisplayReconciler *display, long frame)
         TraceLog(LOG_INFO, "display command=%s rect=%d,%d %dx%d attempt=%d frame=%ld", DISPLAY_COMMAND_NAMES[step.command.kind],
                  step.command.rect.x, step.command.rect.y, step.command.rect.width, step.command.rect.height,
                  step.next.attempts, frame);
-        DisplayApply(step.command);
         return true;
     case DISPLAY_EVENT_SETTLED:
     case DISPLAY_EVENT_GAVE_UP:
@@ -74,7 +76,10 @@ static bool ReconcileDisplay(DisplayReconciler *display, long frame)
             TraceLog(LOG_WARNING, "display screen size %dx%d differs from the framebuffer %dx%d; world labels are off",
                      GetScreenWidth(), GetScreenHeight(), w.width, w.height);
         }
-        return false;
+        /* DisableCursor centred the hidden cursor in the old window size. Without a new centre, the first mouse
+         * motion after the change turns the view by the offset. */
+        if (IsCursorHidden()) SetMousePosition(GetScreenWidth() / 2, GetScreenHeight() / 2);
+        return true;
     }
     return false;
 }
@@ -196,7 +201,7 @@ static int RunGame(DisplayReconciler *display, bool debug)
             WindowMode next = display->target == WINDOW_MODE_FULLSCREEN ? WINDOW_MODE_WINDOWED : WINDOW_MODE_FULLSCREEN;
             *display = DisplaySetTarget(*display, next);
         }
-        /* A window move warps the cursor, so the look discard restarts on every command, also on a late retry. */
+        /* A window move warps the cursor, so the look discard restarts on every command and settle. */
         if (ReconcileDisplay(display, frame)) discard_look_frames = LOOK_SETTLE_FRAMES;
         if (overlay == OVERLAY_NONE) {
             FrameInput in = routed.sim;
