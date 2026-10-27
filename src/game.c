@@ -441,7 +441,7 @@ static void UpdateWeapon(GameState *g, const FrameInput *in, float dt)
     if (in->select_slot >= 1 && in->select_slot <= p->slot_count) {
         target = in->select_slot - 1;
     } else if (in->cycle_steps != 0) {
-        target = ((p->active + in->cycle_steps) % p->slot_count + p->slot_count) % p->slot_count;
+        target = PlayerCycleSlot(p, in->cycle_steps);
     }
     if (target != p->active) {
         p->active = target;
@@ -709,6 +709,11 @@ static void UpdateRound(GameState *g, float dt)
 bool PlayerHasPerk(const Player *p, PerkId id)
 {
     return (p->perks & (1u << id)) != 0;
+}
+
+int PlayerCycleSlot(const Player *p, int steps)
+{
+    return ((p->active + steps) % p->slot_count + p->slot_count) % p->slot_count;
 }
 
 static const WeaponSlot *OwnedSlot(const Player *p, WeaponId id)

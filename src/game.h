@@ -33,20 +33,28 @@
 #define WALL_HEIGHT 3.5f
 #define GAME_EVENT_CAPACITY 64
 
+/* One-shot fields of FrameInput: X(name, type, merge). The fixed-step clock merges them across render frames and
+   clears them after a step, so a new row needs no other edit to survive that. merge is PULSE_OR, PULSE_SUM or
+   PULSE_LAST (src/input.h). */
+#define FRAME_PULSES(X) \
+    X(fire_pressed, bool, PULSE_OR) \
+    X(reload_pressed, bool, PULSE_OR) \
+    X(interact_pressed, bool, PULSE_OR) \
+    X(select_slot, int, PULSE_LAST) /* 1-based slot picked by a number key, 0 for none */ \
+    X(cycle_steps, int, PULSE_SUM)  /* mouse wheel: positive selects the next weapon, negative the previous */ \
+    X(jump_pressed, bool, PULSE_OR) \
+    X(restart_pressed, bool, PULSE_OR)
+
+#define FRAME_PULSE_FIELD(name, type, merge) type name;
 typedef struct FrameInput {
     Vector2 move; /* x strafes right, y moves forward, length <= 1 */
-    Vector2 look; /* radians: x turns right, y looks up */
+    Vector2 look; /* radians: x turns right, y looks up; summed across frames */
     bool fire_held;
-    bool fire_pressed;
-    bool reload_pressed;
-    bool interact_pressed;
-    int select_slot;  /* 1-based slot picked by a number key, 0 for none */
-    int cycle_steps;  /* mouse wheel: positive selects the next weapon, negative the previous */
     bool sprint_held;
     bool crouch_held;
-    bool jump_pressed;
-    bool restart_pressed;
+    FRAME_PULSES(FRAME_PULSE_FIELD)
 } FrameInput;
+#undef FRAME_PULSE_FIELD
 
 typedef enum GamePhase {
     PHASE_INTERMISSION,
@@ -276,6 +284,8 @@ extern const int DEBUG_COMMAND_COUNT;
 
 void GameDebugApply(GameState *g, const DebugCommand *cmd);
 bool PlayerHasPerk(const Player *p, PerkId id);
+/* The slot that `steps` mouse wheel steps select, wrapping past either end. */
+int PlayerCycleSlot(const Player *p, int steps);
 float ReloadDuration(const Player *p, WeaponId id);
 Vector3 PlayerEye(const Player *p);
 Vector3 PlayerForward(const Player *p);

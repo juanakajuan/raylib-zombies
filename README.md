@@ -23,20 +23,46 @@ On Linux it also needs the X11 and OpenGL development headers.
 
 ## Controls
 
+Move the mouse to look around. In the pause menu, move the pointer onto a setting row to select it, and drag its bar to change it. `src/input.c` holds the key bindings, and the tables below come from them. `input_test` fails when the tables are stale. Run `build/input_test --print-controls` to print new tables.
+
+<!-- controls:begin -->
+
+**Playing**
+
 | Key | Action |
 | --- | --- |
-| W A S D | Move |
-| Mouse | Look |
-| Left mouse | Fire |
-| R | Reload (restart on the game over screen) |
-| E | Buy or interact |
-| 1, 2 or mouse wheel | Select weapon |
-| Shift | Sprint |
-| Space | Jump |
-| Ctrl / C | Crouch (hold) |
-| Esc | Pause and free the mouse. Esc again resumes, Q quits while paused |
-| Mouse, or Up / Down, Left / Right | While paused: hover or click a setting row and drag its bar, or select and change it with the arrows |
-| F11 or Alt+Enter | Switch between fullscreen and windowed |
+| F11 or Alt+Enter | fullscreen |
+| Esc | pause and free the mouse |
+| F1 | debug menu (with `--debug`) |
+| W A S D | move |
+| Left mouse | fire |
+| R | reload (restart on the game over screen) |
+| E | buy or interact |
+| 1, 2 or mouse wheel | select weapon |
+| Shift | sprint |
+| Space | jump |
+| Ctrl / C | crouch (hold) |
+
+**Paused**
+
+| Key | Action |
+| --- | --- |
+| F11 or Alt+Enter | fullscreen |
+| Esc | resume |
+| Q | quit |
+| Up/Down | select |
+| Left/Right or mouse | adjust |
+
+**Debug menu**
+
+| Key | Action |
+| --- | --- |
+| F11 or Alt+Enter | fullscreen |
+| F1 or Esc | close |
+| Up/Down | select |
+| Enter or click | apply |
+
+<!-- controls:end -->
 
 ## Settings
 
