@@ -159,6 +159,7 @@ typedef struct Violation {
 static bool CheckState(const GameState *g, Violation *v)
 {
     const Player *p = &g->player;
+    if (!isfinite(p->health) || !isfinite(p->pos.x) || !isfinite(p->pos.y) || !isfinite(p->pos.z)) VIOLATE("player health or position is not finite");
     if (p->health < 0.0f || p->health > p->max_health + EPS) VIOLATE("health %.3f outside [0, %.1f]", p->health, p->max_health);
     if (p->points < 0) VIOLATE("points %d < 0", p->points);
     if (p->slot_count < 1 || p->slot_count > MAX_SLOTS || p->active < 0 || p->active >= p->slot_count) VIOLATE("slot_count %d active %d", p->slot_count, p->active);
@@ -176,7 +177,9 @@ static bool CheckState(const GameState *g, Violation *v)
     if (p->pos.y < 0.0f) VIOLATE("player below the floor");
     for (int i = 0; i < MAX_ZOMBIES; i++) {
         const Zombie *z = &g->zombies[i];
-        if (z->state != ZOMBIE_FREE && GameBlocked(g, z->pos, ZOMBIE_RADIUS)) VIOLATE("zombie %d inside a solid at %.2f,%.2f", i, z->pos.x, z->pos.z);
+        if (z->state == ZOMBIE_FREE) continue;
+        if (!isfinite(z->pos.x) || !isfinite(z->pos.z)) VIOLATE("zombie %d position is not finite", i);
+        if (GameBlocked(g, z->pos, ZOMBIE_RADIUS)) VIOLATE("zombie %d inside a solid at %.2f,%.2f", i, z->pos.x, z->pos.z);
     }
     return true;
 }
@@ -207,6 +210,7 @@ static bool CheckStep(const GameState *pre, const GameState *post, float dt, Vio
         spent += GameDescribeInteractable(pre, post->events[i].arg).cost;
     }
     if (b->points < a->points - spent) VIOLATE("points fell %d -> %d with %d spent", a->points, b->points, spent);
+    if (!HitThisStep(post) && b->points != a->points - spent) VIOLATE("points %d -> %d with %d spent and no hit", a->points, b->points, spent);
     /* A shot after the purchase in the same step spends one round of a refill. */
     Player undo = *b;
     for (int i = 0; i < post->event_count; i++) undo.slots[undo.active].mag += post->events[i].kind == EVENT_FIRE;
@@ -218,8 +222,12 @@ static bool CheckStep(const GameState *pre, const GameState *post, float dt, Vio
     /* A buy equips the weapon, and a swap in the same step can go back to the old slot. */
     bool swapped = a->active != b->active || purchases > 0;
     float ticked = game_over ? a->fire_cooldown : fmaxf(0.0f, a->fire_cooldown - dt);
+    float ceiling = swapped ? fmaxf(ticked, SWAP_TIME) : ticked;
+    for (int i = 0; i < post->event_count; i++) {
+        if (post->events[i].kind == EVENT_FIRE) ceiling = fmaxf(ceiling, WEAPONS[post->events[i].arg].fire_interval);
+    }
     if (b->fire_cooldown < ticked - EPS) VIOLATE("fire_cooldown fell %.4f -> %.4f in dt %.4f", a->fire_cooldown, b->fire_cooldown, dt);
-    if (b->fire_cooldown > ticked + EPS && !HasEvent(post, EVENT_FIRE) && !swapped) VIOLATE("fire_cooldown rose %.4f -> %.4f without cause", a->fire_cooldown, b->fire_cooldown);
+    if (b->fire_cooldown > ceiling + EPS) VIOLATE("fire_cooldown rose %.4f -> %.4f, ceiling %.4f", a->fire_cooldown, b->fire_cooldown, ceiling);
     if (b->reload_timer > a->reload_timer + EPS && !HasEvent(post, EVENT_RELOAD)) VIOLATE("reload_timer rose without a reload");
 
     /* Effect timers fade what is on screen, so they tick in every phase, game over included. */
@@ -236,7 +244,7 @@ static bool CheckStep(const GameState *pre, const GameState *post, float dt, Vio
     }
     for (int i = 0; i < MAX_DAMAGE_NUMBERS; i++) {
         float before = pre->damage_numbers[i].timer, after = post->damage_numbers[i].timer;
-        if (after != DAMAGE_NUMBER_TIME && !CheckTimer("damage number timer", before, after, dt, v)) return false;
+        if (!(HitThisStep(post) && after == DAMAGE_NUMBER_TIME) && !CheckTimer("damage number timer", before, after, dt, v)) return false;
     }
     return true;
 }
@@ -278,23 +286,35 @@ static double NowSeconds(void)
     return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
 }
 
+/* Parses a positive count, or returns 0 when the text is not one. */
+static long ParseCount(const char *text)
+{
+    char *end;
+    long value = strtol(text, &end, 10);
+    return end != text && *end == '\0' && value > 0 ? value : 0;
+}
+
 int main(int argc, char **argv)
 {
-    int seeds = argc > 1 ? atoi(argv[1]) : DEFAULT_SEEDS;
-    long steps = argc > 2 ? atol(argv[2]) : DEFAULT_STEPS;
+    long seeds = argc > 1 ? ParseCount(argv[1]) : DEFAULT_SEEDS;
+    long steps = argc > 2 ? ParseCount(argv[2]) : DEFAULT_STEPS;
+    if (argc > 3 || seeds <= 0 || seeds > UINT32_MAX || steps <= 0) {
+        fprintf(stderr, "usage: invariant_test [seeds] [steps], both positive integers\n");
+        return EXIT_FAILURE;
+    }
     int failures = 0;
     RunStats sum = {0};
     double start = NowSeconds();
-    for (int s = 1; s <= seeds; s++) {
+    for (long s = 1; s <= seeds; s++) {
         Violation v = {0};
         long at = Run((uint32_t)s, steps, &v, &sum);
         if (at > 0) {
             failures++;
-            printf("FAIL seed %d step %ld: %s\n", s, at, v.msg);
+            printf("FAIL seed %ld step %ld: %s\n", s, at, v.msg);
         }
     }
     double secs = NowSeconds() - start;
-    printf("%d seeds, %ld steps, %.3f s; game overs %ld, restarts %ld, purchases %ld, kills %ld, debug commands %ld; %d failing seeds\n",
+    printf("%ld seeds, %ld steps, %.3f s; game overs %ld, restarts %ld, purchases %ld, kills %ld, debug commands %ld; %d failing seeds\n",
            seeds, sum.steps, secs, sum.game_overs, sum.restarts, sum.purchases, sum.kills, sum.debug_cmds, failures);
     return failures > 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 }

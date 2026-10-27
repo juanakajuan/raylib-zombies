@@ -31,6 +31,7 @@
 #define RESTART_DELAY 1.5f
 #define DAMAGE_FLASH_TIME 0.35f
 #define ZOMBIE_HIT_FLASH_TIME 0.12f
+#define SWAP_TIME 0.3f
 #define WALL_HEIGHT 3.5f
 #define GAME_EVENT_CAPACITY 64
 
