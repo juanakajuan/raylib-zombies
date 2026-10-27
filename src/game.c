@@ -419,8 +419,6 @@ static void UpdateWeapon(GameState *g, const FrameInput *in, float dt)
 {
     Player *p = &g->player;
     p->fire_cooldown = fmaxf(0.0f, p->fire_cooldown - dt);
-    p->hitmarker_timer = fmaxf(0.0f, p->hitmarker_timer - dt);
-    p->muzzle_timer = fmaxf(0.0f, p->muzzle_timer - dt);
 
     if (p->reload_timer > 0.0f) {
         p->reload_timer -= dt;
@@ -654,7 +652,6 @@ static void TickZombieTimers(Zombie *z, float dt)
 static void UpdateZombie(GameState *g, int index, float dt)
 {
     Zombie *z = &g->zombies[index];
-    TickZombieTimers(z, dt);
     if (!ZombieTargetable(z)) return;
 
     Vector3 steer = ZombieSteering(g, z);
@@ -690,7 +687,6 @@ static void UpdateHealth(GameState *g, float dt)
 {
     Player *p = &g->player;
     p->time_since_damage += dt;
-    p->damage_flash = fmaxf(0.0f, p->damage_flash - dt);
     if (p->time_since_damage >= REGEN_DELAY) p->health = fminf(p->max_health, p->health + REGEN_RATE * dt);
 }
 
@@ -899,13 +895,23 @@ static void UpdateInteraction(GameState *g, const FrameInput *in)
     ApplyInteraction(g, &LEVEL_INTERACTABLES[index]);
 }
 
+/* Effect timers only fade what is on screen, so they run in every phase. */
+static void TickEffectTimers(GameState *g, float dt)
+{
+    Player *p = &g->player;
+    p->hitmarker_timer = fmaxf(0.0f, p->hitmarker_timer - dt);
+    p->muzzle_timer = fmaxf(0.0f, p->muzzle_timer - dt);
+    p->damage_flash = fmaxf(0.0f, p->damage_flash - dt);
+    for (int i = 0; i < MAX_ZOMBIES; i++) TickZombieTimers(&g->zombies[i], dt);
+    for (int i = 0; i < MAX_DAMAGE_NUMBERS; i++) g->damage_numbers[i].timer = fmaxf(0.0f, g->damage_numbers[i].timer - dt);
+}
+
 void GameUpdate(GameState *g, const FrameInput *in, float dt)
 {
     g->event_count = 0;
     g->phase_timer += dt;
-    for (int i = 0; i < MAX_DAMAGE_NUMBERS; i++) g->damage_numbers[i].timer = fmaxf(0.0f, g->damage_numbers[i].timer - dt);
+    TickEffectTimers(g, dt);
     if (g->phase == PHASE_GAME_OVER) {
-        for (int i = 0; i < MAX_ZOMBIES; i++) TickZombieTimers(&g->zombies[i], dt);
         if (in->restart_pressed && g->phase_timer >= RESTART_DELAY) GameInit(g, RngNext(g));
         return;
     }
