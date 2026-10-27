@@ -6,9 +6,12 @@
 #include "raymath.h"
 #include "rlgl.h"
 
+#include "input.h"
+
 #define TILE_SIZE 2.0f
 #define LABEL_RANGE 12.0f
 #define VIGNETTE_SIZE 200
+#define FOOTER_CAPACITY 256
 #define HEALTH_BAR_HEIGHT 2.05f
 #define HEALTH_BAR_WIDTH 0.6f
 #define HEALTH_BAR_THICKNESS 0.07f
@@ -341,7 +344,7 @@ static void DrawHud(const GameState *g, Camera3D camera)
     DrawTextShadow(TextFormat("%d / %d", slot->mag, slot->reserve), width - 300, height - 86, 56,
                    slot->mag == 0 ? blood : (Color){255, 255, 255, 255});
     if (p->slot_count > 1) {
-        int other = 1 - p->active;
+        int other = PlayerCycleSlot(p, 1);
         DrawTextShadow(TextFormat("[%d] %s", other + 1, WEAPONS[p->slots[other].id].name), width - 300, height - 146, 18, (Color){255, 255, 255, 150});
     }
     if (p->reload_timer > 0.0f) DrawTextShadow("RELOADING", width - 300, height - 180, 24, (Color){255, 220, 90, 255});
@@ -545,7 +548,9 @@ void DrawPauseOverlay(const Settings *settings, int selected, bool fullscreen)
     DrawTextShadow(TextFormat(selected == PAUSE_ROW_DISPLAY ? "< %s >" : "%s", fullscreen ? "fullscreen" : "windowed"),
                    (int)PauseBarBounds(PAUSE_ROW_DISPLAY).x, (int)display_row.y, font_size, display_color);
 
-    DrawTextCentered("Mouse or Up/Down/Left/Right to adjust, Esc resume, F11 fullscreen, Q quit", width / 2,
+    char footer[FOOTER_CAPACITY];
+    InputFooter(CONTEXT_PAUSE, footer, sizeof footer);
+    DrawTextCentered(footer, width / 2,
                      (int)PauseRowBounds(PAUSE_ROW_COUNT).y + 30, 24, (Color){255, 230, 120, 255});
     rlPopMatrix();
 }
@@ -584,7 +589,9 @@ void DrawDebugOverlay(const GameState *g, int selected)
         DrawTextShadow(label, (int)row.x, (int)row.y, DEBUG_FONT_SIZE, color);
     }
 
-    DrawTextCentered("Up/Down select, Enter or click apply, F1 or Esc close", width / 2,
+    char footer[FOOTER_CAPACITY];
+    InputFooter(CONTEXT_DEBUG, footer, sizeof footer);
+    DrawTextCentered(footer, width / 2,
                      (int)DebugRowBounds(DEBUG_COMMAND_COUNT).y + DEBUG_FOOTER_GAP, DEBUG_FOOTER_SIZE, (Color){255, 230, 120, 255});
     rlPopMatrix();
 }

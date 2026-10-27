@@ -9,6 +9,7 @@
 
 #include "audio.h"
 #include "game.h"
+#include "input.h"
 #include "render.h"
 #include "settings.h"
 
@@ -37,60 +38,6 @@ typedef struct SimClock {
     FrameInput pending;
     float accumulator;
 } SimClock;
-
-static FrameInput ReadInput(float sensitivity)
-{
-    FrameInput in = {0};
-    Vector2 mouse = GetMouseDelta();
-    float scale = MOUSE_SENSITIVITY * sensitivity;
-    in.look = (Vector2){mouse.x * scale, -mouse.y * scale};
-    in.move.x = (float)(IsKeyDown(KEY_D) - IsKeyDown(KEY_A));
-    in.move.y = (float)(IsKeyDown(KEY_W) - IsKeyDown(KEY_S));
-    if (Vector2Length(in.move) > 1.0f) in.move = Vector2Normalize(in.move);
-    in.fire_held = IsMouseButtonDown(MOUSE_BUTTON_LEFT);
-    in.fire_pressed = IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
-    in.reload_pressed = IsKeyPressed(KEY_R);
-    in.interact_pressed = IsKeyPressed(KEY_E);
-    for (int i = 0; i < MAX_SLOTS; i++) {
-        if (IsKeyPressed(KEY_ONE + i)) in.select_slot = i + 1;
-    }
-    float wheel = GetMouseWheelMove();
-    in.cycle_steps = (wheel < 0.0f) - (wheel > 0.0f);
-    in.sprint_held = IsKeyDown(KEY_LEFT_SHIFT);
-    in.crouch_held = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_C);
-    in.jump_pressed = IsKeyPressed(KEY_SPACE);
-    in.restart_pressed = IsKeyPressed(KEY_R);
-    return in;
-}
-
-/* Frames can outpace the sim step, so one-shot events and look deltas queue until a step consumes them. */
-static void MergeInput(FrameInput *pending, const FrameInput *fresh)
-{
-    pending->move = fresh->move;
-    pending->fire_held = fresh->fire_held;
-    pending->sprint_held = fresh->sprint_held;
-    pending->crouch_held = fresh->crouch_held;
-    pending->look = Vector2Add(pending->look, fresh->look);
-    pending->fire_pressed = pending->fire_pressed || fresh->fire_pressed;
-    pending->reload_pressed = pending->reload_pressed || fresh->reload_pressed;
-    pending->interact_pressed = pending->interact_pressed || fresh->interact_pressed;
-    if (fresh->select_slot != 0) pending->select_slot = fresh->select_slot;
-    pending->cycle_steps += fresh->cycle_steps;
-    pending->jump_pressed = pending->jump_pressed || fresh->jump_pressed;
-    pending->restart_pressed = pending->restart_pressed || fresh->restart_pressed;
-}
-
-static void ClearOneShots(FrameInput *in)
-{
-    in->look = Vector2Zero();
-    in->fire_pressed = false;
-    in->reload_pressed = false;
-    in->interact_pressed = false;
-    in->select_slot = 0;
-    in->cycle_steps = 0;
-    in->jump_pressed = false;
-    in->restart_pressed = false;
-}
 
 static void AdvanceSim(GameState *g, SimClock *clock, const FrameInput *fresh, float frame_dt)
 {
@@ -146,89 +93,73 @@ static void UpdateWindowedLayout(void)
     if (windowed_layout_frames > 0 && --windowed_layout_frames == 0) ApplyWindowedLayout();
 }
 
-static bool DisplayTogglePressed(void)
+static KeySnapshot ReadKeys(void)
 {
-    bool alt = IsKeyDown(KEY_LEFT_ALT) || IsKeyDown(KEY_RIGHT_ALT);
-    return IsKeyPressed(KEY_F11) || (alt && IsKeyPressed(KEY_ENTER));
+    KeySnapshot keys = {.mouse_delta = GetMouseDelta()};
+    for (int code = 1; code < INPUT_KEYBOARD_COUNT; code++) {
+        keys.code[code] = (unsigned char)(IsKeyDown(code) * INPUT_DOWN | IsKeyPressed(code) * INPUT_PRESSED |
+                                          IsKeyPressedRepeat(code) * INPUT_REPEAT);
+    }
+    keys.code[INPUT_MOUSE_LEFT] =
+        (unsigned char)(IsMouseButtonDown(MOUSE_BUTTON_LEFT) * INPUT_DOWN | IsMouseButtonPressed(MOUSE_BUTTON_LEFT) * INPUT_PRESSED);
+    float wheel = GetMouseWheelMove();
+    keys.code[INPUT_WHEEL_UP] = (unsigned char)((wheel > 0.0f) * INPUT_PRESSED);
+    keys.code[INPUT_WHEEL_DOWN] = (unsigned char)((wheel < 0.0f) * INPUT_PRESSED);
+    return keys;
 }
 
-static bool MenuKeyPressed(int key)
+static MenuPointer ReadPointer(void)
 {
-    return IsKeyPressed(key) || IsKeyPressedRepeat(key);
+    Vector2 delta = GetMouseDelta();
+    return (MenuPointer){
+        .pos = UiMousePosition(),
+        .moved = delta.x != 0.0f || delta.y != 0.0f,
+        .pressed = IsMouseButtonPressed(MOUSE_BUTTON_LEFT),
+        .down = IsMouseButtonDown(MOUSE_BUTTON_LEFT),
+    };
 }
 
-typedef struct SettingsMenu {
-    int selected;
-    int dragging; /* row whose bar the held mouse button grabbed, or -1 */
-    bool toggle_display; /* set for one update when the window mode row asks for a change */
-} SettingsMenu;
-
-/* Returns true when a setting changed. A drag keeps its row until the button is released. */
-static bool UpdateSettingsMenu(Settings *settings, SettingsMenu *menu)
+/* Returns true when a setting changed. */
+static bool ApplyPauseEffect(Settings *settings, MenuEffect effect, bool *toggle_display)
 {
-    Vector2 mouse = UiMousePosition();
-    bool changed = false;
-    menu->toggle_display = false;
-    menu->selected = (menu->selected + PAUSE_ROW_COUNT + MenuKeyPressed(KEY_DOWN) - MenuKeyPressed(KEY_UP)) % PAUSE_ROW_COUNT;
-    if (GetMouseDelta().x != 0.0f || GetMouseDelta().y != 0.0f) {
-        for (int i = 0; i < PAUSE_ROW_COUNT; i++) {
-            if (CheckCollisionPointRec(mouse, PauseRowBounds(i))) menu->selected = i;
+    bool display = effect.row == PAUSE_ROW_DISPLAY;
+    switch (effect.kind) {
+    case MENU_NONE:
+        return false;
+    case MENU_ACTIVATE:
+        *toggle_display = *toggle_display || display;
+        return false;
+    case MENU_ADJUST:
+        if (display) {
+            *toggle_display = true;
+            return false;
         }
+        SettingsAdjust(settings, (SettingId)effect.row, effect.direction);
+        return true;
+    case MENU_SET_RATIO:
+        SettingsSetRatio(settings, (SettingId)effect.row, effect.ratio);
+        return true;
     }
-    if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT)) menu->dragging = -1;
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-        for (int i = 0; i < PAUSE_ROW_COUNT; i++) {
-            if (!CheckCollisionPointRec(mouse, PauseRowBounds(i))) continue;
-            menu->selected = i;
-            if (i == PAUSE_ROW_DISPLAY) menu->toggle_display = true;
-            else if (CheckCollisionPointRec(mouse, PauseBarBounds(i))) menu->dragging = i;
-        }
-    }
-    if (menu->dragging >= 0) {
-        Rectangle bar = PauseBarBounds(menu->dragging);
-        SettingsSetRatio(settings, (SettingId)menu->dragging, (mouse.x - bar.x) / bar.width);
-        menu->selected = menu->dragging;
-        changed = true;
-    }
-    int direction = MenuKeyPressed(KEY_RIGHT) - MenuKeyPressed(KEY_LEFT);
-    if (direction != 0 && menu->selected == PAUSE_ROW_DISPLAY) {
-        menu->toggle_display = true;
-    } else if (direction != 0) {
-        SettingsAdjust(settings, (SettingId)menu->selected, direction);
-        changed = true;
-    }
-    return changed;
+    return false;
 }
 
-typedef struct DebugMenu {
-    int selected;
-} DebugMenu;
-
-static void UpdateDebugMenu(GameState *g, DebugMenu *menu)
+static MenuEffect UpdatePauseMenu(MenuState *menu, MenuIntent intent, const MenuPointer *pointer)
 {
-    Vector2 mouse = UiMousePosition();
-    menu->selected = (menu->selected + DEBUG_COMMAND_COUNT + MenuKeyPressed(KEY_DOWN) - MenuKeyPressed(KEY_UP)) % DEBUG_COMMAND_COUNT;
-    bool clicked = false;
-    if (GetMouseDelta().x != 0.0f || GetMouseDelta().y != 0.0f) {
-        for (int i = 0; i < DEBUG_COMMAND_COUNT; i++) {
-            if (CheckCollisionPointRec(mouse, DebugRowBounds(i))) menu->selected = i;
-        }
+    Rectangle rows[PAUSE_ROW_COUNT];
+    Rectangle bars[PAUSE_ROW_COUNT];
+    for (int i = 0; i < PAUSE_ROW_COUNT; i++) {
+        rows[i] = PauseRowBounds(i);
+        bars[i] = i == PAUSE_ROW_DISPLAY ? (Rectangle){0} : PauseBarBounds(i);
     }
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-        for (int i = 0; i < DEBUG_COMMAND_COUNT; i++) {
-            if (!CheckCollisionPointRec(mouse, DebugRowBounds(i))) continue;
-            menu->selected = i;
-            clicked = true;
-        }
-    }
-    if (clicked || (IsKeyPressed(KEY_ENTER) && !DisplayTogglePressed())) GameDebugApply(g, &DEBUG_COMMANDS[menu->selected]);
+    return MenuUpdate(menu, &(MenuRows){PAUSE_ROW_COUNT, rows, bars}, intent, pointer);
 }
 
-typedef enum Overlay {
-    OVERLAY_NONE,
-    OVERLAY_PAUSE,
-    OVERLAY_DEBUG,
-} Overlay;
+static MenuEffect UpdateDebugMenu(MenuState *menu, MenuIntent intent, const MenuPointer *pointer)
+{
+    Rectangle rows[DEBUG_COMMAND_COUNT];
+    for (int i = 0; i < DEBUG_COMMAND_COUNT; i++) rows[i] = DebugRowBounds(i);
+    return MenuUpdate(menu, &(MenuRows){DEBUG_COMMAND_COUNT, rows, NULL}, intent, pointer);
+}
 
 /* Pause lives here, not in GamePhase: a paused loop just stops stepping the sim. */
 static int RunGame(bool debug)
@@ -239,8 +170,8 @@ static int RunGame(bool debug)
     bool quit = false;
     int discard_look_frames = LOOK_SETTLE_FRAMES;
     Settings settings;
-    SettingsMenu menu = {.selected = 0, .dragging = -1};
-    DebugMenu debug_menu = {0};
+    MenuState menu = {.selected = 0, .dragging = -1};
+    MenuState debug_menu = {.selected = 0, .dragging = -1};
     bool settings_dirty = false;
     SettingsLoad(&settings);
     SetMasterVolume(settings.volume);
@@ -250,14 +181,12 @@ static int RunGame(bool debug)
 
     while (!quit && !WindowShouldClose()) {
         UpdateWindowedLayout();
-        if (DisplayTogglePressed()) {
-            SetDisplayMode(IsWindowFullscreen() ? DISPLAY_WINDOWED : DISPLAY_FULLSCREEN);
-            discard_look_frames = LOOK_SETTLE_FRAMES;
-        }
-        Overlay previous = overlay;
-        if (IsKeyPressed(KEY_ESCAPE)) overlay = overlay == OVERLAY_NONE ? OVERLAY_PAUSE : OVERLAY_NONE;
-        if (debug && IsKeyPressed(KEY_F1) && overlay != OVERLAY_PAUSE) overlay = overlay == OVERLAY_NONE ? OVERLAY_DEBUG : OVERLAY_NONE;
-        if (overlay != previous) {
+        KeySnapshot keys = ReadKeys();
+        Routed routed = RouteInput(overlay, debug, &keys, MOUSE_SENSITIVITY * settings.sensitivity);
+        bool toggle_display = routed.toggle_display;
+        quit = routed.quit;
+        if (routed.overlay_changed) {
+            overlay = routed.overlay;
             clock = (SimClock){0};
             if (overlay != OVERLAY_NONE) {
                 EnableCursor();
@@ -268,19 +197,22 @@ static int RunGame(bool debug)
                 discard_look_frames = LOOK_SETTLE_FRAMES;
             }
         }
-        quit = overlay == OVERLAY_PAUSE && IsKeyPressed(KEY_Q);
-        if (overlay == OVERLAY_PAUSE && UpdateSettingsMenu(&settings, &menu)) {
+        MenuPointer pointer = ReadPointer();
+        if (routed.menu_active && overlay == OVERLAY_PAUSE &&
+            ApplyPauseEffect(&settings, UpdatePauseMenu(&menu, routed.menu, &pointer), &toggle_display)) {
             settings_dirty = true;
             SetMasterVolume(settings.volume);
         }
-        if (menu.toggle_display) {
+        if (routed.menu_active && overlay == OVERLAY_DEBUG) {
+            MenuEffect effect = UpdateDebugMenu(&debug_menu, routed.menu, &pointer);
+            if (effect.kind == MENU_ACTIVATE) GameDebugApply(&game, &DEBUG_COMMANDS[effect.row]);
+        }
+        if (toggle_display) {
             SetDisplayMode(IsWindowFullscreen() ? DISPLAY_WINDOWED : DISPLAY_FULLSCREEN);
             discard_look_frames = LOOK_SETTLE_FRAMES;
-            menu.toggle_display = false;
         }
-        if (overlay == OVERLAY_DEBUG && previous == OVERLAY_DEBUG) UpdateDebugMenu(&game, &debug_menu);
         if (overlay == OVERLAY_NONE) {
-            FrameInput in = ReadInput(settings.sensitivity);
+            FrameInput in = routed.sim;
             if (discard_look_frames > 0) {
                 in.look = Vector2Zero();
                 discard_look_frames--;
