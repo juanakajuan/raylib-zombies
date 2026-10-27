@@ -76,9 +76,6 @@ static bool ReconcileDisplay(DisplayReconciler *display, long frame)
             TraceLog(LOG_WARNING, "display screen size %dx%d differs from the framebuffer %dx%d; world labels are off",
                      GetScreenWidth(), GetScreenHeight(), w.width, w.height);
         }
-        /* DisableCursor centred the hidden cursor in the old window size. Without a new centre, the first mouse
-         * motion after the change turns the view by the offset. */
-        if (IsCursorHidden()) SetMousePosition(GetScreenWidth() / 2, GetScreenHeight() / 2);
         return true;
     }
     }
@@ -173,6 +170,9 @@ static int RunGame(DisplayReconciler *display, bool debug)
 
     for (long frame = 0; !quit && !WindowShouldClose(); frame++) {
         KeySnapshot keys = ReadKeys();
+        /* GLFW holds the real pointer at the window centre and adds motion to a virtual position. A late EnterNotify
+         * after a resize moves the virtual position to the real pointer, so an uncentred one turns the view. */
+        if (IsCursorHidden()) SetMousePosition(GetScreenWidth() / 2, GetScreenHeight() / 2);
         Routed routed = RouteInput(overlay, debug, &keys, MOUSE_SENSITIVITY * settings.sensitivity);
         bool toggle_display = routed.toggle_display;
         quit = routed.quit;
