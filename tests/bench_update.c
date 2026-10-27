@@ -111,12 +111,12 @@ int main(void)
     for (int c = 0; c < NAV_CELLS; c++) {
         if (!field.walkable[c]) continue;
         double begin = NowSeconds();
-        NavFlood(&field, c);
+        NavFlood(&field, NavCellCenter(c));
         flood_us[goals++] = (NowSeconds() - begin) * 1e6;
     }
     qsort(flood_us, (size_t)goals, sizeof flood_us[0], CompareDoubles);
     GameState rebuilt = start;
-    rebuilt.nav.ready = false;
+    rebuilt.nav.walkable_open_zones = 0;
     double begin = NowSeconds();
     GameUpdateNav(&rebuilt);
     printf("nav flood_median_us=%.1f flood_worst_us=%.1f goals=%d walkable_and_flood_us=%.1f\n", flood_us[goals / 2], flood_us[goals - 1], goals,

@@ -6,12 +6,17 @@
 #include "raymath.h"
 
 #define NAV_SEED_RADIUS 2
+#define NAV_SEED_REACH 0.9f
 
 #define LOOKAHEAD_CELLS 3
+#define LINE_START_NUDGE 1e-4f
 
 static const int STEP_DX[8] = {1, -1, 0, 0, 1, 1, -1, -1};
 static const int STEP_DZ[8] = {0, 0, 1, -1, 1, -1, 1, -1};
-static const uint16_t STEP_COST[8] = {10, 10, 10, 10, 14, 14, 14, 14};
+#define STRAIGHT_COST 10
+#define DIAGONAL_COST 14
+static const uint16_t STEP_COST[8] = {STRAIGHT_COST, STRAIGHT_COST, STRAIGHT_COST, STRAIGHT_COST,
+                                      DIAGONAL_COST, DIAGONAL_COST, DIAGONAL_COST, DIAGONAL_COST};
 
 int NavCellAt(Vector3 pos)
 {
@@ -36,16 +41,18 @@ static int StepCell(int cell, int k)
     return row * NAV_COLS + col;
 }
 
+static bool CornerOpen(const bool *open, int cell, int dx, int dz)
+{
+    return open[cell + dx] && open[cell + dz * NAV_COLS];
+}
+
 static bool CornerClear(const NavField *f, int cell, int k)
 {
-    if (k < 4) return true;
-    int col = cell % NAV_COLS;
-    int row = cell / NAV_COLS;
-    return f->walkable[row * NAV_COLS + col + STEP_DX[k]] && f->walkable[(row + STEP_DZ[k]) * NAV_COLS + col];
+    return k < 4 || CornerOpen(f->walkable, cell, STEP_DX[k], STEP_DZ[k]);
 }
 
 #define QUEUE_BUCKETS 64
-_Static_assert(QUEUE_BUCKETS > NAV_SEED_RADIUS * 15 + 14, "every queued cost must fit in one turn of the buckets");
+_Static_assert(QUEUE_BUCKETS > (NAV_SEED_RADIUS + 1) * DIAGONAL_COST + DIAGONAL_COST, "every queued cost must fit in one turn of the buckets");
 
 typedef struct CostQueue {
     int count;
@@ -77,8 +84,47 @@ static void QueueLower(CostQueue *q, uint16_t *cost, int cell, uint16_t value)
     q->count++;
 }
 
-void NavFlood(NavField *f, int goal)
+static bool LineOpen(const bool *open, Vector3 from, Vector3 to)
 {
+    int cell = NavCellAt(Vector3Lerp(from, to, LINE_START_NUDGE));
+    int col = cell % NAV_COLS;
+    int row = cell / NAV_COLS;
+    int end = NavCellAt(to);
+    int steps = abs(end % NAV_COLS - col) + abs(end / NAV_COLS - row);
+    float dx = to.x - from.x;
+    float dz = to.z - from.z;
+    int step_col = dx > 0.0f ? 1 : -1;
+    int step_row = dz > 0.0f ? 1 : -1;
+    float delta_x = dx != 0.0f ? NAV_CELL_SIZE / fabsf(dx) : INFINITY;
+    float delta_z = dz != 0.0f ? NAV_CELL_SIZE / fabsf(dz) : INFINITY;
+    float edge_x = NAV_MIN_X + (float)(col + (step_col > 0)) * NAV_CELL_SIZE;
+    float edge_z = NAV_MIN_Z + (float)(row + (step_row > 0)) * NAV_CELL_SIZE;
+    float next_x = dx != 0.0f ? (edge_x - from.x) / dx : INFINITY;
+    float next_z = dz != 0.0f ? (edge_z - from.z) / dz : INFINITY;
+    while (steps > 0) {
+        bool cross_col = next_x <= next_z;
+        bool cross_row = next_z <= next_x;
+        int corner = row * NAV_COLS + col;
+        if (cross_col) {
+            col += step_col;
+            next_x += delta_x;
+            steps--;
+        }
+        if (cross_row) {
+            row += step_row;
+            next_z += delta_z;
+            steps--;
+        }
+        if (col < 0 || col >= NAV_COLS || row < 0 || row >= NAV_ROWS) return false;
+        if (cross_col && cross_row && !CornerOpen(open, corner, step_col, step_row)) return false;
+        if (!open[row * NAV_COLS + col]) return false;
+    }
+    return row * NAV_COLS + col == end;
+}
+
+void NavFlood(NavField *f, Vector3 target)
+{
+    int goal = NavCellAt(target);
     CostQueue q;
     q.count = 0;
     for (int b = 0; b < QUEUE_BUCKETS; b++) q.head[b] = -1;
@@ -86,15 +132,15 @@ void NavFlood(NavField *f, int goal)
         f->cost[c] = NAV_UNREACHED;
         q.queued[c] = false;
     }
-    Vector3 goal_center = NavCellCenter(goal);
     for (int dz = -NAV_SEED_RADIUS; dz <= NAV_SEED_RADIUS; dz++) {
         for (int dx = -NAV_SEED_RADIUS; dx <= NAV_SEED_RADIUS; dx++) {
             int col = goal % NAV_COLS + dx;
             int row = goal / NAV_COLS + dz;
             if (col < 0 || col >= NAV_COLS || row < 0 || row >= NAV_ROWS) continue;
             int c = row * NAV_COLS + col;
-            if (!f->walkable[c]) continue;
-            QueueLower(&q, f->cost, c, (uint16_t)(Vector3Distance(NavCellCenter(c), goal_center) / NAV_CELL_SIZE * 10.0f));
+            float distance = Vector3Distance(NavCellCenter(c), target);
+            if (distance > NAV_SEED_REACH || !f->walkable[c] || !LineOpen(f->solid_free, target, NavCellCenter(c))) continue;
+            QueueLower(&q, f->cost, c, (uint16_t)(distance / NAV_CELL_SIZE * STRAIGHT_COST));
         }
     }
     for (int bucket = 0; q.count > 0; bucket = (bucket + 1) % QUEUE_BUCKETS) {
@@ -112,7 +158,6 @@ void NavFlood(NavField *f, int goal)
     f->goal = goal;
 }
 
-/* The lowest-cost cell one step from cell, or cell itself when no step goes down. */
 static int Downhill(const NavField *f, int cell)
 {
     int best = cell;
@@ -129,55 +174,14 @@ static int Downhill(const NavField *f, int cell)
     return best;
 }
 
-/* Walks every cell the segment crosses. Where it passes exactly through a corner, both side cells must be walkable. */
-static bool LineWalkable(const NavField *f, Vector3 from, Vector3 to)
-{
-    int cell = NavCellAt(from);
-    int col = cell % NAV_COLS;
-    int row = cell / NAV_COLS;
-    int end = NavCellAt(to);
-    int steps = abs(end % NAV_COLS - col) + abs(end / NAV_COLS - row);
-    float dx = to.x - from.x;
-    float dz = to.z - from.z;
-    int step_col = dx > 0.0f ? 1 : -1;
-    int step_row = dz > 0.0f ? 1 : -1;
-    float delta_x = dx != 0.0f ? NAV_CELL_SIZE / fabsf(dx) : INFINITY;
-    float delta_z = dz != 0.0f ? NAV_CELL_SIZE / fabsf(dz) : INFINITY;
-    float edge_x = NAV_MIN_X + (float)(col + (step_col > 0)) * NAV_CELL_SIZE;
-    float edge_z = NAV_MIN_Z + (float)(row + (step_row > 0)) * NAV_CELL_SIZE;
-    float next_x = dx != 0.0f ? (edge_x - from.x) / dx : INFINITY;
-    float next_z = dz != 0.0f ? (edge_z - from.z) / dz : INFINITY;
-    while (steps > 0) {
-        if (next_x < next_z) {
-            col += step_col;
-            next_x += delta_x;
-            steps--;
-        } else if (next_z < next_x) {
-            row += step_row;
-            next_z += delta_z;
-            steps--;
-        } else {
-            if (!f->walkable[row * NAV_COLS + col + step_col] || !f->walkable[(row + step_row) * NAV_COLS + col]) return false;
-            col += step_col;
-            row += step_row;
-            next_x += delta_x;
-            next_z += delta_z;
-            steps -= 2;
-        }
-        if (!f->walkable[row * NAV_COLS + col]) return false;
-    }
-    return row * NAV_COLS + col == end;
-}
-
-/* Aims at a cell centre and never at the player, because a player flush with a face stands on the plane where a zombie can freeze. */
 Vector3 NavDirection(const NavField *f, Vector3 from, Vector3 target)
 {
     int here = NavCellAt(from);
     int aim = Downhill(f, here);
-    if (here == f->goal || aim == here || f->cost[aim] == NAV_UNREACHED) return Vector3Normalize(Vector3Subtract(target, from));
+    if (here == f->goal || aim == here) return Vector3Normalize(Vector3Subtract(target, from));
     for (int k = 0; k < LOOKAHEAD_CELLS && aim != f->goal; k++) {
         int further = Downhill(f, aim);
-        if (further == aim || !LineWalkable(f, from, NavCellCenter(further))) break;
+        if (further == aim || !LineOpen(f->walkable, from, NavCellCenter(further))) break;
         aim = further;
     }
     return Vector3Normalize(Vector3Subtract(NavCellCenter(aim), from));

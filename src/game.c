@@ -21,7 +21,6 @@
 #define STOP_DISTANCE 0.9f
 #define SEPARATION_DISTANCE 0.85f
 #define SEPARATION_SPEED 2.0f
-/* Eases the heading so a zombie that steers from cell to cell does not twitch. */
 #define ZOMBIE_TURN_TIME 0.12f
 #define MIN_SPAWN_DISTANCE 7.0f
 #define FIRST_SPAWN_DELAY 0.8f
@@ -115,6 +114,7 @@ const Interactable LEVEL_INTERACTABLES[] = {
 const int LEVEL_INTERACTABLE_COUNT = (int)(sizeof LEVEL_INTERACTABLES / sizeof LEVEL_INTERACTABLES[0]);
 
 _Static_assert(sizeof LEVEL_ZONES / sizeof LEVEL_ZONES[0] == ZONE_COUNT, "zone table matches ZONE_COUNT");
+_Static_assert(ZONE_COUNT < 32, "the walkable mask key keeps one bit per zone and one bit that is always set");
 
 static const Vector3 PLAYER_START = {0.0f, 0.0f, 10.0f};
 
@@ -181,13 +181,13 @@ BoundingBox ZombieHeadBox(const Zombie *z)
     return (BoundingBox){{z->pos.x - 0.2f, 1.45f, z->pos.z - 0.2f}, {z->pos.x + 0.2f, 1.85f, z->pos.z + 0.2f}};
 }
 
-static int SolidSlotCount(void)
+int GameSolidCount(void)
 {
     return LEVEL_WALL_COUNT + LEVEL_DOOR_COUNT + LEVEL_INTERACTABLE_COUNT;
 }
 
 /* Walls, closed doors and solid interactables share one index space so movement and bullets agree on what is solid. */
-static const BoundingBox *SolidSlot(const GameState *g, int slot)
+const BoundingBox *GameSolid(const GameState *g, int slot)
 {
     if (slot < LEVEL_WALL_COUNT) return &LEVEL_WALLS[slot];
     slot -= LEVEL_WALL_COUNT;
@@ -205,8 +205,8 @@ static bool OverlapsSolid(const BoundingBox *b, Vector3 pos, float radius)
 
 bool GameBlocked(const GameState *g, Vector3 pos, float radius)
 {
-    for (int i = 0; i < SolidSlotCount(); i++) {
-        const BoundingBox *b = SolidSlot(g, i);
+    for (int i = 0; i < GameSolidCount(); i++) {
+        const BoundingBox *b = GameSolid(g, i);
         if (b != NULL && OverlapsSolid(b, pos, radius)) return true;
     }
     return false;
@@ -266,20 +266,11 @@ static Vector3 SlideMove(const GameState *g, Vector3 pos, Vector3 delta, int mov
     return trial;
 }
 
-static int ZoneAt(Vector3 pos, int fallback)
-{
-    for (int i = 0; i < ZONE_COUNT; i++) {
-        const Zone *z = &LEVEL_ZONES[i];
-        if (pos.x >= z->min_x && pos.x <= z->max_x && pos.z >= z->min_z && pos.z <= z->max_z) return i;
-    }
-    return fallback;
-}
-
 static float NearestSolidDistance(const GameState *g, Ray ray)
 {
     float nearest = INFINITY;
-    for (int i = 0; i < SolidSlotCount(); i++) {
-        const BoundingBox *b = SolidSlot(g, i);
+    for (int i = 0; i < GameSolidCount(); i++) {
+        const BoundingBox *b = GameSolid(g, i);
         if (b == NULL) continue;
         RayCollision hit = GetRayCollisionBox(ray, *b);
         if (hit.hit && hit.distance < nearest) nearest = hit.distance;
@@ -486,7 +477,6 @@ static void UpdateMovement(GameState *g, const FrameInput *in, float dt)
     if (crouching) speed = CROUCH_SPEED;
     Vector3 wish = Vector3Add(Vector3Scale(forward, in->move.y), Vector3Scale(right, in->move.x));
     p->pos = SlideMove(g, p->pos, Vector3Scale(wish, speed * dt), PLAYER_MOVER);
-    g->player_zone = ZoneAt(p->pos, g->player_zone);
 }
 
 int GameAliveZombies(const GameState *g)
@@ -564,7 +554,6 @@ static bool SpawnZombie(GameState *g)
         .speed = RoundZombieSpeed(g),
         .attack_timer = 0.6f,
         .growl_timer = GROWL_INTERVAL + GROWL_STAGGER * (float)((slot - g->zombies) % GROWL_STAGGER_SLOTS),
-        .zone = LEVEL_SPAWNS[spawn].zone,
     };
     return true;
 }
@@ -591,15 +580,20 @@ static void DamagePlayer(GameState *g, float amount)
 
 static void FillWalkable(const GameState *g, NavField *f)
 {
-    for (int c = 0; c < NAV_CELLS; c++) f->walkable[c] = true;
-    for (int i = 0; i < SolidSlotCount(); i++) {
-        const BoundingBox *b = SolidSlot(g, i);
+    for (int c = 0; c < NAV_CELLS; c++) {
+        f->walkable[c] = true;
+        f->solid_free[c] = true;
+    }
+    for (int i = 0; i < GameSolidCount(); i++) {
+        const BoundingBox *b = GameSolid(g, i);
         if (b == NULL) continue;
-        int first = NavCellAt((Vector3){b->min.x - ZOMBIE_RADIUS, 0.0f, b->min.z - ZOMBIE_RADIUS});
-        int last = NavCellAt((Vector3){b->max.x + ZOMBIE_RADIUS, 0.0f, b->max.z + ZOMBIE_RADIUS});
+        float reach = fmaxf(ZOMBIE_RADIUS, NAV_CELL_SIZE / 2.0f);
+        int first = NavCellAt((Vector3){b->min.x - reach, 0.0f, b->min.z - reach});
+        int last = NavCellAt((Vector3){b->max.x + reach, 0.0f, b->max.z + reach});
         for (int row = first / NAV_COLS; row <= last / NAV_COLS; row++) {
             for (int c = row * NAV_COLS + first % NAV_COLS; c <= row * NAV_COLS + last % NAV_COLS; c++) {
                 if (OverlapsSolid(b, NavCellCenter(c), ZOMBIE_RADIUS)) f->walkable[c] = false;
+                if (OverlapsSolid(b, NavCellCenter(c), NAV_CELL_SIZE / 2.0f)) f->solid_free[c] = false;
             }
         }
     }
@@ -608,17 +602,16 @@ static void FillWalkable(const GameState *g, NavField *f)
 void GameUpdateNav(GameState *g)
 {
     NavField *f = &g->nav;
-    uint32_t open_zones = 0;
+    uint32_t open_zones = 1u << ZONE_COUNT;
     for (int i = 0; i < ZONE_COUNT; i++) open_zones |= g->zone_open[i] ? 1u << i : 0u;
     int goal = NavCellAt(g->player.pos);
-    if (!f->ready || f->walkable_open_zones != open_zones) {
+    if (f->walkable_open_zones != open_zones) {
         FillWalkable(g, f);
         f->walkable_open_zones = open_zones;
-        f->ready = true;
     } else if (f->goal == goal) {
         return;
     }
-    NavFlood(f, goal);
+    NavFlood(f, g->player.pos);
 }
 
 static Vector3 ZombieSteering(const GameState *g, const Zombie *z)
@@ -667,11 +660,9 @@ static void UpdateZombie(GameState *g, int index, float dt)
     Vector3 steer = ZombieSteering(g, z);
     Vector3 velocity = Vector3Add(Vector3Scale(steer, z->speed), Vector3Scale(ZombieSeparation(g, index), SEPARATION_SPEED));
     z->pos = SlideMove(g, z->pos, Vector3Scale(velocity, dt), index);
-    z->zone = ZoneAt(z->pos, z->zone);
     if (Vector3LengthSqr(steer) > 0.0f) {
-        float turn = atan2f(steer.x, -steer.z) - z->yaw;
-        turn = atan2f(sinf(turn), cosf(turn));
-        z->yaw += turn * (1.0f - expf(-dt / ZOMBIE_TURN_TIME));
+        float turn = remainderf(atan2f(steer.x, -steer.z) - z->yaw, 2.0f * PI);
+        z->yaw = remainderf(z->yaw + turn * (1.0f - expf(-dt / ZOMBIE_TURN_TIME)), 2.0f * PI);
     }
 
     Vector3 to_player = Vector3Subtract(PlayerFloorPoint(g), z->pos);

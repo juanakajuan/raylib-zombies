@@ -42,13 +42,22 @@ static void AimAt(Player *p, Vector3 target)
     p->pitch = atan2f(dy, sqrtf(dx * dx + dz * dz));
 }
 
+static int ZoneOf(Vector3 pos)
+{
+    for (int i = 0; i < ZONE_COUNT; i++) {
+        const Zone *z = &LEVEL_ZONES[i];
+        if (pos.x >= z->min_x && pos.x <= z->max_x && pos.z >= z->min_z && pos.z <= z->max_z) return i;
+    }
+    return -1;
+}
+
 static Zombie *PlaceZombie(GameState *g, Vector3 pos, float health)
 {
     for (int i = 0; i < MAX_ZOMBIES; i++) {
         if (g->zombies[i].state != ZOMBIE_FREE) continue;
         g->zombies[i] = (Zombie){
             .state = ZOMBIE_CHASE, .pos = pos, .health = health, .max_health = health,
-            .speed = 1.2f, .attack_timer = 1.0f, .zone = pos.z >= 0.0f ? 0 : 1,
+            .speed = 1.2f, .attack_timer = 1.0f,
         };
         return &g->zombies[i];
     }
@@ -233,7 +242,7 @@ static void TestIntermissionAndSpawning(void)
             if (before[i] != ZOMBIE_FREE || g.zombies[i].state == ZOMBIE_FREE) continue;
             if (spawned == 0) first_pos = g.zombies[i].pos;
             spawned++;
-            all_in_zone_zero = all_in_zone_zero && g.zombies[i].zone == 0 && IsZoneZeroSpawn(g.zombies[i].pos);
+            all_in_zone_zero = all_in_zone_zero && ZoneOf(g.zombies[i].pos) == 0 && IsZoneZeroSpawn(g.zombies[i].pos);
         }
     }
     CHECK(spawned == 6, "spawned=%d", spawned);
@@ -333,8 +342,8 @@ static void TestZombiesCrossTheDoorway(void)
         float dx = z->pos.x - g.player.pos.x;
         float dz = z->pos.z - g.player.pos.z;
         CHECK(violations == 0, "%s: %d samples inside a wall", cases[c].name, violations);
-        CHECK(z->zone == g.player_zone && sqrtf(dx * dx + dz * dz) < 1.2f,
-              "%s: zombie must reach the player, zone=%d pos=%.1f,%.1f", cases[c].name, z->zone, (double)z->pos.x, (double)z->pos.z);
+        CHECK(ZoneOf(z->pos) == ZoneOf(g.player.pos) && sqrtf(dx * dx + dz * dz) < 1.2f, "%s: zombie must reach the player, zone=%d pos=%.1f,%.1f",
+              cases[c].name, ZoneOf(z->pos), (double)z->pos.x, (double)z->pos.z);
     }
 }
 
@@ -346,6 +355,50 @@ static void TestNavGridCoversEveryZone(void)
                   z->max_z <= NAV_MIN_Z + NAV_ROWS * NAV_CELL_SIZE,
               "zone %d is outside the nav grid", i);
     }
+}
+
+static void TestFlowFieldGoesAroundAThinWall(void)
+{
+    static NavField f;
+    int wall_row = NAV_ROWS / 2;
+    for (int c = 0; c < NAV_CELLS; c++) {
+        f.walkable[c] = c / NAV_COLS != wall_row || c % NAV_COLS < 5 || c % NAV_COLS > NAV_COLS - 6;
+        f.solid_free[c] = f.walkable[c];
+    }
+    Vector3 player = NavCellCenter((wall_row - 1) * NAV_COLS + NAV_COLS / 2);
+    player.z += 0.2f;
+    NavFlood(&f, player);
+    Vector3 zombie = NavCellCenter((wall_row + 1) * NAV_COLS + NAV_COLS / 2);
+    Vector3 dir = NavDirection(&f, zombie, player);
+    CHECK(fabsf(dir.x) > fabsf(dir.z), "a zombie behind a thin wall must walk around it, dir=%.2f,%.2f", (double)dir.x, (double)dir.z);
+    int far_side = f.cost[(wall_row + 1) * NAV_COLS + NAV_COLS / 2];
+    CHECK(far_side > 2 * (NAV_COLS / 2 - 5) * 10, "the far side of the wall must cost the path around it, cost=%d", far_side);
+}
+
+static void TestFlowFieldReachesEverySpawnFromEverySpotNearASolid(void)
+{
+    int spots = 0;
+    int cut_off = 0;
+    char first[128] = "";
+    for (int door_open = 0; door_open <= 1; door_open++) {
+        GameState g = NewActiveGame();
+        g.zone_open[1] = door_open;
+        for (float x = NAV_MIN_X; x <= NAV_MIN_X + NAV_COLS * NAV_CELL_SIZE; x += NAV_CELL_SIZE) {
+            for (float z = NAV_MIN_Z; z <= NAV_MIN_Z + NAV_ROWS * NAV_CELL_SIZE; z += NAV_CELL_SIZE) {
+                g.player.pos = (Vector3){x, 0.0f, z};
+                if (ZoneOf(g.player.pos) < 0 || !g.zone_open[ZoneOf(g.player.pos)] || GameBlocked(&g, g.player.pos, PLAYER_RADIUS)) continue;
+                if (!GameBlocked(&g, g.player.pos, PLAYER_RADIUS + 1.0f)) continue;
+                GameUpdateNav(&g);
+                spots++;
+                for (int s = 0; s < LEVEL_SPAWN_COUNT; s++) {
+                    if (!g.zone_open[LEVEL_SPAWNS[s].zone] || g.nav.cost[NavCellAt(LEVEL_SPAWNS[s].pos)] != NAV_UNREACHED) continue;
+                    if (cut_off++ == 0) snprintf(first, sizeof first, "door_open=%d player=%.2f,%.2f spawn=%d", door_open, (double)x, (double)z, s);
+                }
+            }
+        }
+    }
+    CHECK(spots > 600, "the check must cover every solid, spots=%d", spots);
+    CHECK(cut_off == 0, "%d spawns have no path to the player, first: %s", cut_off, first);
 }
 
 static void TestZombiesPathThroughADoorThatOpensMidGame(void)
@@ -416,39 +469,15 @@ static void TestEveryZombieReachesEveryPlayerSpot(void)
     CHECK(t.stuck == 0, "%d of %d chasing zombies never reached the player, first: %s", t.stuck, t.runs, t.first);
 }
 
-#define MAX_SOLID_BOXES 32
-
-static int SolidBoxes(const GameState *g, BoundingBox *out, int cap)
-{
-    int n = 0;
-    for (int i = 0; i < LEVEL_WALL_COUNT; i++) {
-        if (n < cap) out[n] = LEVEL_WALLS[i];
-        n++;
-    }
-    for (int i = 0; i < LEVEL_DOOR_COUNT; i++) {
-        if (g->zone_open[LEVEL_DOORS[i].opens_zone]) continue;
-        if (n < cap) out[n] = LEVEL_DOORS[i].box;
-        n++;
-    }
-    for (int i = 0; i < LEVEL_INTERACTABLE_COUNT; i++) {
-        if (!LEVEL_INTERACTABLES[i].solid) continue;
-        if (n < cap) out[n] = LEVEL_INTERACTABLES[i].box;
-        n++;
-    }
-    return n;
-}
-
 static void TestEveryZombieReachesAPlayerFlushWithAnyFace(void)
 {
     ReachTally t = {0};
     for (int door_open = 0; door_open <= 1; door_open++) {
         GameState g = NewActiveGame();
         g.zone_open[1] = door_open;
-        BoundingBox solids[MAX_SOLID_BOXES];
-        int count = SolidBoxes(&g, solids, MAX_SOLID_BOXES);
-        CHECK(count <= MAX_SOLID_BOXES, "raise MAX_SOLID_BOXES to %d", count);
-        for (int s = 0; s < count && s < MAX_SOLID_BOXES; s++) {
-            BoundingBox b = solids[s];
+        for (int s = 0; s < GameSolidCount(); s++) {
+            if (GameSolid(&g, s) == NULL) continue;
+            BoundingBox b = *GameSolid(&g, s);
             for (int face = 0; face < 4; face++) {
                 bool along_z = face < 2;
                 float fixed = face == 0 ? b.min.x - PLAYER_RADIUS : face == 1 ? b.max.x + PLAYER_RADIUS
@@ -543,11 +572,11 @@ static void TestZombiesCannotHitThroughThePartition(void)
     z->attack_timer = 0.0f;
     bool hit_through_wall = false;
 
-    for (int i = 0; i < 60 * 10 && z->zone == 1; i++) {
+    for (int i = 0; i < 60 * 10 && ZoneOf(z->pos) == 1; i++) {
         GameUpdate(&g, &idle, DT);
-        hit_through_wall = hit_through_wall || (z->zone == 1 && g.player.health < PLAYER_BASE_HEALTH);
+        hit_through_wall = hit_through_wall || (ZoneOf(z->pos) == 1 && g.player.health < PLAYER_BASE_HEALTH);
     }
-    CHECK(z->zone == 0, "zombie never left the back room, zone=%d", z->zone);
+    CHECK(ZoneOf(z->pos) == 0, "zombie never left the back room, zone=%d", ZoneOf(z->pos));
     CHECK(!hit_through_wall, "a zombie in the back room hurt a player in the front room");
 }
 
@@ -644,12 +673,13 @@ static void TestDoor(void)
     walker.player.pos = (Vector3){0.0f, 0.0f, 3.0f};
     FrameInput forward = {.move = {0.0f, 1.0f}};
     for (int i = 0; i < 60 * 2; i++) GameUpdate(&walker, &forward, DT);
-    CHECK(walker.player.pos.z < -2.0f && walker.player_zone == 1, "player stuck at z=%.2f zone=%d", (double)walker.player.pos.z, walker.player_zone);
+    CHECK(walker.player.pos.z < -2.0f && ZoneOf(walker.player.pos) == 1, "player stuck at z=%.2f zone=%d", (double)walker.player.pos.z,
+          ZoneOf(walker.player.pos));
 
     GameState sealed = NewActiveGame();
     sealed.player.pos = (Vector3){0.0f, 0.0f, 3.0f};
     for (int i = 0; i < 60 * 2; i++) GameUpdate(&sealed, &forward, DT);
-    CHECK(sealed.player.pos.z > 0.0f && sealed.player_zone == 0, "closed door let the player through, z=%.2f", (double)sealed.player.pos.z);
+    CHECK(sealed.player.pos.z > 0.0f && ZoneOf(sealed.player.pos) == 0, "closed door let the player through, z=%.2f", (double)sealed.player.pos.z);
 
     GameState spawner = NewActiveGame();
     spawner.zone_open[1] = true;
@@ -661,7 +691,7 @@ static void TestDoor(void)
         spawner.player.health = spawner.player.max_health;
         GameUpdate(&spawner, &idle, DT);
         for (int k = 0; k < MAX_ZOMBIES; k++) {
-            if (before[k] == ZOMBIE_FREE && spawner.zombies[k].state != ZOMBIE_FREE) zone_seen[spawner.zombies[k].zone] = true;
+            if (before[k] == ZOMBIE_FREE && spawner.zombies[k].state != ZOMBIE_FREE) zone_seen[ZoneOf(spawner.zombies[k].pos)] = true;
         }
     }
     CHECK(zone_seen[0] && zone_seen[1], "spawns seen per zone: %d,%d", zone_seen[0], zone_seen[1]);
@@ -1706,6 +1736,8 @@ int main(void)
     TestZombiesStayOutOfWalls();
     TestZombiesCrossTheDoorway();
     TestNavGridCoversEveryZone();
+    TestFlowFieldGoesAroundAThinWall();
+    TestFlowFieldReachesEverySpawnFromEverySpotNearASolid();
     TestZombiesPathThroughADoorThatOpensMidGame();
     TestEveryZombieReachesEveryPlayerSpot();
     TestEveryZombieReachesAPlayerFlushWithAnyFace();

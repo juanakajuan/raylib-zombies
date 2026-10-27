@@ -139,7 +139,6 @@ typedef struct Zombie {
     float dying_timer;
     float hit_flash;
     float growl_timer;
-    int zone;
 } Zombie;
 
 typedef struct Zone {
@@ -237,7 +236,6 @@ typedef struct GameState {
     float spawn_timer;
     bool zone_open[ZONE_COUNT];
     NavField nav;
-    int player_zone;
     int kills;
     int rounds_survived;
     bool god_mode;
@@ -250,6 +248,8 @@ typedef struct GameState {
 void GameInit(GameState *g, uint32_t seed);
 void GameUpdate(GameState *g, const FrameInput *in, float dt);
 void GameUpdateNav(GameState *g);
+int GameSolidCount(void);
+const BoundingBox *GameSolid(const GameState *g, int slot);
 
 bool GameBlocked(const GameState *g, Vector3 pos, float radius);
 bool GameInteractableVisible(const GameState *g, int index, Vector3 eye);
