@@ -6,11 +6,13 @@
 #include <time.h>
 
 #include "game.h"
+#include "input.h"
 
 #define BENCH_DT (1.0f / 240.0f)
 #define BENCH_RUNS 7
 #define BENCH_STEPS 100000
 #define WARMUP_STEP_LIMIT (240 * 120)
+#define ROUTE_FRAMES 200000
 #define CIRCLE_CENTER_X 0.0f
 #define CIRCLE_CENTER_Z 7.0f
 #define CIRCLE_RADIUS 3.0f
@@ -46,6 +48,26 @@ static int CompareDoubles(const void *a, const void *b)
     double x = *(const double *)a;
     double y = *(const double *)b;
     return (x > y) - (x < y);
+}
+
+/* A busy frame of play: walk, sprint, fire and reload. Returns the median microseconds per RouteInput call. */
+static double BenchRouteInput(void)
+{
+    KeySnapshot keys = {.mouse_delta = {3.0f, -2.0f}};
+    const int held[] = {KEY_W, KEY_D, KEY_LEFT_SHIFT, INPUT_MOUSE_LEFT};
+    for (size_t i = 0; i < sizeof held / sizeof held[0]; i++) keys.code[held[i]] = INPUT_DOWN;
+    keys.code[KEY_R] = INPUT_DOWN | INPUT_PRESSED;
+    double us_per_frame[BENCH_RUNS];
+    for (int run = 0; run < BENCH_RUNS; run++) {
+        double begin = NowSeconds();
+        for (int i = 0; i < ROUTE_FRAMES; i++) {
+            keys.mouse_delta.x = (float)(i & 7);
+            RouteInput(OVERLAY_NONE, false, &keys, 0.002f);
+        }
+        us_per_frame[run] = (NowSeconds() - begin) * 1e6 / ROUTE_FRAMES;
+    }
+    qsort(us_per_frame, BENCH_RUNS, sizeof us_per_frame[0], CompareDoubles);
+    return us_per_frame[BENCH_RUNS / 2];
 }
 
 int main(void)
@@ -121,5 +143,6 @@ int main(void)
     GameUpdateNav(&rebuilt);
     printf("nav flood_median_us=%.1f flood_worst_us=%.1f goals=%d walkable_and_flood_us=%.1f\n", flood_us[goals / 2], flood_us[goals - 1], goals,
            (NowSeconds() - begin) * 1e6);
+    printf("median_us_per_route=%.3f frames=%d runs=%d\n", BenchRouteInput(), ROUTE_FRAMES, BENCH_RUNS);
     return all_alive ? EXIT_SUCCESS : EXIT_FAILURE;
 }

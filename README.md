@@ -23,20 +23,46 @@ On Linux it also needs the X11 and OpenGL development headers.
 
 ## Controls
 
+Move the mouse to look around. In the pause menu, move the pointer onto a setting row to select it, and drag its bar to change it. `src/input.c` holds the key bindings, and the tables below come from them. `input_test` fails when the tables are stale. Run `build/input_test --print-controls` to print new tables.
+
+<!-- controls:begin -->
+
+**Playing**
+
 | Key | Action |
 | --- | --- |
-| W A S D | Move |
-| Mouse | Look |
-| Left mouse | Fire |
-| R | Reload (restart on the game over screen) |
-| E | Buy or interact |
-| 1, 2 or mouse wheel | Select weapon |
-| Shift | Sprint |
-| Space | Jump |
-| Ctrl / C | Crouch (hold) |
-| Esc | Pause and free the mouse. Esc again resumes, Q quits while paused |
-| Mouse, or Up / Down, Left / Right | While paused: hover or click a setting row and drag its bar, or select and change it with the arrows |
-| F11 or Alt+Enter | Switch between fullscreen and windowed |
+| F11 or Alt+Enter | fullscreen |
+| Esc | pause and free the mouse |
+| F1 | debug menu (with `--debug`) |
+| W A S D | move |
+| Left mouse | fire |
+| R | reload (restart on the game over screen) |
+| E | buy or interact |
+| 1, 2 or mouse wheel | select weapon |
+| Shift | sprint |
+| Space | jump |
+| Ctrl / C | crouch (hold) |
+
+**Paused**
+
+| Key | Action |
+| --- | --- |
+| F11 or Alt+Enter | fullscreen |
+| Esc | resume |
+| Q | quit |
+| Up/Down | select |
+| Left/Right or mouse | adjust |
+
+**Debug menu**
+
+| Key | Action |
+| --- | --- |
+| F11 or Alt+Enter | fullscreen |
+| F1 or Esc | close |
+| Up/Down | select |
+| Enter or click | apply |
+
+<!-- controls:end -->
 
 ## Settings
 
@@ -69,7 +95,7 @@ ctest --test-dir build --output-on-failure
 `zombies_test` drives the simulation headlessly with scripted input.
 `--smoke` opens the real window, plays a scripted bot for about 10 seconds and writes `smoke_1.png`, `smoke_2.png` and `smoke_3.png` to the working directory.
 
-`./build/zombies_bench` measures the simulation cost at 240 Hz with 24 chasing zombies, over 7 runs. For a player that stands still and for a player that walks a circle, it prints the median microseconds per `GameUpdate` step, the 99.9th percentile step, the median and the maximum of the worst step in each run, and the number of zombie flow-field floods. Then it prints the time of one flood and of a full field rebuild. It is not part of `ctest`. Use a Release build for the measurement.
+`./build/zombies_bench` measures the simulation cost at 240 Hz with 24 chasing zombies, over 7 runs. For a player that stands still and for a player that walks a circle, it prints the median microseconds per `GameUpdate` step, the 99.9th percentile step, the median and the maximum of the worst step in each run, and the number of zombie flow-field floods. Then it prints the time of one flood and of a full field rebuild, and the median microseconds per `RouteInput` call for a busy frame of play. It is not part of `ctest`. Use a Release build for the measurement.
 
 ## Sound sources and licenses
 
