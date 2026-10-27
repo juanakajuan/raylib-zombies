@@ -1,13 +1,13 @@
 #include "nav.h"
 
 #include <math.h>
+#include <stdlib.h>
 
 #include "raymath.h"
 
 #define NAV_SEED_RADIUS 2
 
-#define LOOKAHEAD_CELLS 6
-#define LINE_SAMPLE_SPACING (NAV_CELL_SIZE * 0.25f)
+#define LOOKAHEAD_CELLS 3
 
 static const int STEP_DX[8] = {1, -1, 0, 0, 1, 1, -1, -1};
 static const int STEP_DZ[8] = {0, 0, 1, -1, 1, -1, 1, -1};
@@ -129,14 +129,44 @@ static int Downhill(const NavField *f, int cell)
     return best;
 }
 
+/* Walks every cell the segment crosses. Where it passes exactly through a corner, both side cells must be walkable. */
 static bool LineWalkable(const NavField *f, Vector3 from, Vector3 to)
 {
-    float length = Vector3Distance(from, to);
-    int samples = (int)(length / LINE_SAMPLE_SPACING) + 1;
-    for (int i = 1; i <= samples; i++) {
-        if (!f->walkable[NavCellAt(Vector3Lerp(from, to, (float)i / (float)samples))]) return false;
+    int cell = NavCellAt(from);
+    int col = cell % NAV_COLS;
+    int row = cell / NAV_COLS;
+    int end = NavCellAt(to);
+    int steps = abs(end % NAV_COLS - col) + abs(end / NAV_COLS - row);
+    float dx = to.x - from.x;
+    float dz = to.z - from.z;
+    int step_col = dx > 0.0f ? 1 : -1;
+    int step_row = dz > 0.0f ? 1 : -1;
+    float delta_x = dx != 0.0f ? NAV_CELL_SIZE / fabsf(dx) : INFINITY;
+    float delta_z = dz != 0.0f ? NAV_CELL_SIZE / fabsf(dz) : INFINITY;
+    float edge_x = NAV_MIN_X + (float)(col + (step_col > 0)) * NAV_CELL_SIZE;
+    float edge_z = NAV_MIN_Z + (float)(row + (step_row > 0)) * NAV_CELL_SIZE;
+    float next_x = dx != 0.0f ? (edge_x - from.x) / dx : INFINITY;
+    float next_z = dz != 0.0f ? (edge_z - from.z) / dz : INFINITY;
+    while (steps > 0) {
+        if (next_x < next_z) {
+            col += step_col;
+            next_x += delta_x;
+            steps--;
+        } else if (next_z < next_x) {
+            row += step_row;
+            next_z += delta_z;
+            steps--;
+        } else {
+            if (!f->walkable[row * NAV_COLS + col + step_col] || !f->walkable[(row + step_row) * NAV_COLS + col]) return false;
+            col += step_col;
+            row += step_row;
+            next_x += delta_x;
+            next_z += delta_z;
+            steps -= 2;
+        }
+        if (!f->walkable[row * NAV_COLS + col]) return false;
     }
-    return true;
+    return row * NAV_COLS + col == end;
 }
 
 /* Aims at a cell centre and never at the player, because a player flush with a face stands on the plane where a zombie can freeze. */
