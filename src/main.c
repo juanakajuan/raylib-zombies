@@ -57,8 +57,6 @@ _Static_assert(sizeof DISPLAY_COMMAND_NAMES / sizeof DISPLAY_COMMAND_NAMES[0] ==
 static bool ReconcileDisplay(DisplayReconciler *display, long frame)
 {
     DisplayStepResult step = DisplayUpdate(display);
-    Vector2 position = GetWindowPosition();
-    PixelRect w = {(int)position.x, (int)position.y, GetRenderWidth(), GetRenderHeight()};
     switch (step.event) {
     case DISPLAY_EVENT_NONE:
         return false;
@@ -68,7 +66,9 @@ static bool ReconcileDisplay(DisplayReconciler *display, long frame)
                  step.next.attempts, frame);
         return true;
     case DISPLAY_EVENT_SETTLED:
-    case DISPLAY_EVENT_GAVE_UP:
+    case DISPLAY_EVENT_GAVE_UP: {
+        Vector2 position = GetWindowPosition();
+        PixelRect w = {(int)position.x, (int)position.y, GetRenderWidth(), GetRenderHeight()};
         TraceLog(LOG_INFO, "display mode=%s %s window=%d,%d %dx%d screen=%dx%d frame=%ld", WINDOW_MODE_NAMES[display->target],
                  step.event == DISPLAY_EVENT_SETTLED ? "settled" : "gave-up", w.x, w.y, w.width, w.height, GetScreenWidth(),
                  GetScreenHeight(), frame);
@@ -80,6 +80,7 @@ static bool ReconcileDisplay(DisplayReconciler *display, long frame)
          * motion after the change turns the view by the offset. */
         if (IsCursorHidden()) SetMousePosition(GetScreenWidth() / 2, GetScreenHeight() / 2);
         return true;
+    }
     }
     return false;
 }
