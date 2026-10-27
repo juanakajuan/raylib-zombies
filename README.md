@@ -23,7 +23,7 @@ On Linux it also needs the X11 and OpenGL development headers.
 
 ## Controls
 
-The mouse looks around while playing. In the pause menu, hover or click a setting row and drag its bar. `src/input.c` holds the key bindings, and the tables below come from them. `input_test` fails when the tables are stale. Run `build/input_test --print-controls` to print new tables.
+Move the mouse to look around. In the pause menu, move the pointer onto a setting row to select it, and drag its bar to change it. `src/input.c` holds the key bindings, and the tables below come from them. `input_test` fails when the tables are stale. Run `build/input_test --print-controls` to print new tables.
 
 <!-- controls:begin -->
 

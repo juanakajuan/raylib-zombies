@@ -119,7 +119,7 @@ static MenuPointer ReadPointer(void)
     };
 }
 
-/* Returns true when a setting changed. */
+/* Returns true when a setting changed. A window mode row effect sets *toggle_display instead. */
 static bool ApplyPauseEffect(Settings *settings, MenuEffect effect, bool *toggle_display)
 {
     bool display = effect.row == PAUSE_ROW_DISPLAY;

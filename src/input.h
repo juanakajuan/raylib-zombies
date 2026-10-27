@@ -14,7 +14,7 @@
 
 enum { INPUT_DOWN = 1, INPUT_PRESSED = 2, INPUT_REPEAT = 4 };
 
-/* Every input for one render frame. main.c fills it from raylib, tests build it by hand. */
+/* Every input for one render frame. */
 typedef struct KeySnapshot {
     unsigned char code[INPUT_CODE_COUNT]; /* INPUT_DOWN | INPUT_PRESSED | INPUT_REPEAT */
     Vector2 mouse_delta;
@@ -31,7 +31,7 @@ typedef enum Pulse { FRAME_PULSES(FRAME_PULSE_ID) PULSE_COUNT } Pulse;
 #undef FRAME_PULSE_ID
 
 void FrameInputPulse(FrameInput *in, Pulse pulse, int amount);
-/* Folds one render frame's input into the input that waits for the next sim step. */
+/* Frames can outpace the sim step, so pulses and look deltas wait in `pending` until a step clears them. */
 void MergeInput(FrameInput *pending, const FrameInput *fresh);
 void ClearOneShots(FrameInput *in);
 
@@ -46,7 +46,7 @@ typedef enum Context {
     CONTEXT_PLAY = 1,
     CONTEXT_PAUSE = 2,
     CONTEXT_DEBUG = 4,
-    CONTEXT_ANY = 7,
+    CONTEXT_ANY = CONTEXT_PLAY | CONTEXT_PAUSE | CONTEXT_DEBUG,
 } Context;
 
 typedef enum Hold {
@@ -91,7 +91,7 @@ typedef struct Binding {
     unsigned contexts;
     bool debug_only;
     ActionKind kind;
-    union {
+    union { /* the member that kind names */
         Hold hold;
         Pulse pulse;
         Command command;
@@ -116,7 +116,7 @@ typedef struct Routed {
     bool toggle_display;
     bool menu_active; /* the menu of `overlay` reads `menu` this frame; false on the frame it opens */
     MenuIntent menu;
-    FrameInput sim; /* zero unless overlay is OVERLAY_NONE */
+    FrameInput sim; /* zero unless the frame starts and ends in play */
 } Routed;
 
 /* Keys route by the overlay open at the start of the frame. Chords route before single keys. A frame that opens or

@@ -117,9 +117,28 @@ static bool Down(const KeySnapshot *keys, int code)
 }
 
 /* Menu navigation also fires on key repeat, so a held arrow keeps moving. */
+static bool CommandRepeats(Command command)
+{
+    switch (command) {
+    case COMMAND_MENU_UP:
+    case COMMAND_MENU_DOWN:
+    case COMMAND_MENU_LEFT:
+    case COMMAND_MENU_RIGHT:
+        return true;
+    case COMMAND_OPEN_PAUSE:
+    case COMMAND_OPEN_DEBUG:
+    case COMMAND_CLOSE_OVERLAY:
+    case COMMAND_QUIT:
+    case COMMAND_TOGGLE_DISPLAY:
+    case COMMAND_MENU_APPLY:
+        return false;
+    }
+    return false;
+}
+
 static bool Fired(const KeySnapshot *keys, const Binding *b)
 {
-    bool repeats = b->kind == ACTION_COMMAND && b->command >= COMMAND_MENU_UP && b->command <= COMMAND_MENU_RIGHT;
+    bool repeats = b->kind == ACTION_COMMAND && CommandRepeats(b->command);
     return (keys->code[b->code] & (repeats ? INPUT_PRESSED | INPUT_REPEAT : INPUT_PRESSED)) != 0;
 }
 
