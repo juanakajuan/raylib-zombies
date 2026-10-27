@@ -37,7 +37,8 @@ Preconditions:
 
 ## Gotchas
 
-- With the default `--output 1280x720` fullscreen and windowed are the same size, and `zv window` cannot tell them apart. Use `--output 1920x1080`.
+- `zv window` reads the mode from the last `display mode=` line in `game.log`, not from the window size. The game writes `display command=...` when it sends a window command and `display mode=<mode> settled ... frame=N` when the window reaches the mode. With the default `--output 1280x720` the two modes have the same size, so use `--output 1920x1080` to see the size change.
+- The game keeps raylib's screen size equal to the framebuffer. A `display screen size ... differs from the framebuffer` warning in `game.log` means the world labels are off.
 - The headless output has one monitor. The "centred on the primary monitor" part of windowed mode is not provable here; check it on a real desktop.
 - After resume or a display switch the game drops mouse motion for 2 frames. Wait at least 0.1 s before `zv look`.
 - When the game quits, gamescope exits too. Every later `zv` input command fails with `the X display closed`.

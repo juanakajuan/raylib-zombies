@@ -440,8 +440,8 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         time.sleep(1.2)
         second = session.grab()
         size = first.size  # type: ignore[attr-defined]
-        print(f"window     {size[0]}x{size[1]} ({window_mode(state, size)})")
-        if window_mode(state, size) == "unexpected size":
+        print(f"window     {size[0]}x{size[1]} ({window_mode(run_dir)})")
+        if size not in ((WIDTH, HEIGHT), tuple(int(n) for n in state.output.split("x"))):
             problems.append(f"window is {size[0]}x{size[1]}; expected {WIDTH}x{HEIGHT} or the output {state.output}")
         if first.tobytes() == second.tobytes():  # type: ignore[attr-defined]
             print("frames     identical over 1.2s (normal when paused or on the game over screen)")
@@ -454,18 +454,24 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     print("OK")
 
 
-def window_mode(state: RunState, size: tuple[int, int]) -> str:
-    output = tuple(int(n) for n in state.output.split("x"))
-    if size == output:
-        return "fullscreen" if output != (WIDTH, HEIGHT) else "windowed or fullscreen: output is 1280x720, launch --output 1920x1080 to tell them apart"
-    return "windowed" if size == (WIDTH, HEIGHT) else "unexpected size"
+DISPLAY_MODE_LINE = re.compile(r"display mode=(\w+) (settled|gave-up) window=(\S+) (\d+x\d+)")
+
+
+def window_mode(run_dir: Path) -> str:
+    """The game logs a "display mode=" line each time its display reconciler settles or gives up."""
+    log = (run_dir / "game.log").read_text(errors="replace") if (run_dir / "game.log").is_file() else ""
+    matches = DISPLAY_MODE_LINE.findall(log)
+    if not matches:
+        return "unknown (no display mode line in game.log yet)"
+    mode, result, position, size = matches[-1]
+    return mode if result == "settled" else f"{mode} (gave up at {size} {position})"
 
 
 def cmd_window(args: argparse.Namespace) -> None:
     session = session_for(args.run)
     geometry = session.window.get_geometry()  # type: ignore[attr-defined]
     size = (int(geometry.width), int(geometry.height))
-    line = f"window {size[0]}x{size[1]} output {session.state.output} mode {window_mode(session.state, size)}"
+    line = f"window {size[0]}x{size[1]} output {session.state.output} mode {window_mode(session.run_dir)}"
     log_action(session.run_dir, line)
     print(line)
 
@@ -655,7 +661,7 @@ def main() -> None:
     p.add_argument("--output", default=f"{WIDTH}x{HEIGHT}", help="headless monitor size; 1920x1080 makes fullscreen visible")
     p.add_argument("game_args", nargs=argparse.REMAINDER, help="after --, passed to the game")
     add("doctor", cmd_doctor, "read-only health check of a run")
-    add("window", cmd_window, "print the game window size and whether it is windowed or fullscreen")
+    add("window", cmd_window, "print the game window size and the display mode that the game logged last")
     p = add("key", cmd_key, "press keys, e.g. w, e, r, q, Escape, F11, Alt_L+Return, w+Shift_L")
     p.add_argument("keys")
     p.add_argument("--hold", type=float, default=KEY_TAP, help="seconds the keys stay down")
