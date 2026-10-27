@@ -93,6 +93,7 @@ ctest --test-dir build --output-on-failure
 ```
 
 `zombies_test` drives the simulation headlessly with scripted input.
+`invariant_test` drives the simulation with seeded random input and checks the sim invariants after every step. A failure prints the seed and the step. Run `./build/invariant_test <seeds> <steps>` to try more seeds than the default 8 seeds of 50,000 steps.
 `--smoke` opens the real window, plays a scripted bot for about 10 seconds and writes `smoke_1.png`, `smoke_2.png` and `smoke_3.png` to the working directory.
 
 `./build/zombies_bench` measures the simulation cost at 240 Hz with 24 chasing zombies, over 7 runs. For a player that stands still and for a player that walks a circle, it prints the median microseconds per `GameUpdate` step, the 99.9th percentile step, the median and the maximum of the worst step in each run, and the number of zombie flow-field floods. Then it prints the time of one flood and of a full field rebuild, and the median microseconds per `RouteInput` call for a busy frame of play. It is not part of `ctest`. Use a Release build for the measurement.
@@ -116,6 +117,7 @@ A missing clip falls back to a synthesized sound. Without an audio device the ga
 - `src/audio.c` turns those events into sounds. `assets/` holds the clips and is copied next to the executable at build time. `src/main.c` plays them after each sim step.
 - `src/main.c` reads input, runs the fixed-step loop and implements `--smoke`.
 - `tests/game_test.c` is the headless core-loop test.
+- `tests/invariant_test.c` is the random-input invariant test.
 
 ## License
 
