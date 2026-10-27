@@ -12,7 +12,6 @@
 #define JUMP_SPEED 5.0f
 #define GRAVITY 15.0f
 #define PITCH_LIMIT (89.0f * DEG2RAD)
-#define SWAP_TIME 0.3f
 #define HIT_POINTS 10
 #define KILL_POINTS 60
 #define HEADSHOT_KILL_POINTS 100
