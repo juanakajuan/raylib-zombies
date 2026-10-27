@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 199309L
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
@@ -10,6 +11,19 @@
 #define BENCH_RUNS 7
 #define BENCH_STEPS 100000
 #define WARMUP_STEP_LIMIT (240 * 120)
+#define CIRCLE_CENTER_X 0.0f
+#define CIRCLE_CENTER_Z 7.0f
+#define CIRCLE_RADIUS 3.0f
+#define CIRCLE_SPEED 4.5f
+
+typedef enum Motion {
+    MOTION_STILL,
+    MOTION_CIRCLE,
+} Motion;
+
+static const char *const MOTION_NAMES[] = {"still", "circle"};
+
+static double step_us[BENCH_STEPS];
 
 static int AliveZombies(const GameState *g)
 {
@@ -52,17 +66,58 @@ int main(void)
         return EXIT_FAILURE;
     }
 
-    double us_per_step[BENCH_RUNS];
     GameState g = start;
-    for (int run = 0; run < BENCH_RUNS; run++) {
-        g = start;
-        double begin = NowSeconds();
-        for (int i = 0; i < BENCH_STEPS; i++) GameUpdate(&g, &idle, BENCH_DT);
-        us_per_step[run] = (NowSeconds() - begin) * 1e6 / BENCH_STEPS;
-        printf("run=%d us_per_step=%.3f\n", run + 1, us_per_step[run]);
+    bool all_alive = true;
+    for (Motion motion = MOTION_STILL; motion <= MOTION_CIRCLE; motion++) {
+        double us_per_step[BENCH_RUNS];
+        double worst_us = 0.0;
+        double worst_p999_us = 0.0;
+        long floods = 0;
+        for (int run = 0; run < BENCH_RUNS; run++) {
+            g = start;
+            double total = 0.0;
+            for (int i = 0; i < BENCH_STEPS; i++) {
+                if (motion == MOTION_CIRCLE) {
+                    float angle = (float)i * BENCH_DT * CIRCLE_SPEED / CIRCLE_RADIUS;
+                    g.player.pos = (Vector3){CIRCLE_CENTER_X + CIRCLE_RADIUS * cosf(angle), 0.0f, CIRCLE_CENTER_Z + CIRCLE_RADIUS * sinf(angle)};
+                }
+                int goal = g.nav.goal;
+                double begin = NowSeconds();
+                GameUpdate(&g, &idle, BENCH_DT);
+                step_us[i] = (NowSeconds() - begin) * 1e6;
+                total += step_us[i];
+                floods += g.nav.goal != goal;
+            }
+            us_per_step[run] = total / BENCH_STEPS;
+            qsort(step_us, BENCH_STEPS, sizeof step_us[0], CompareDoubles);
+            double p999_us = step_us[BENCH_STEPS - BENCH_STEPS / 1000];
+            if (step_us[BENCH_STEPS - 1] > worst_us) worst_us = step_us[BENCH_STEPS - 1];
+            if (p999_us > worst_p999_us) worst_p999_us = p999_us;
+            printf("scenario=%s run=%d us_per_step=%.3f p999_us=%.1f worst_us=%.1f\n", MOTION_NAMES[motion], run + 1, us_per_step[run], p999_us,
+                   step_us[BENCH_STEPS - 1]);
+        }
+        qsort(us_per_step, BENCH_RUNS, sizeof us_per_step[0], CompareDoubles);
+        printf("scenario=%s median_us_per_step=%.3f p999_us=%.1f worst_us=%.1f floods_per_run=%ld alive_zombies=%d steps=%d runs=%d\n",
+               MOTION_NAMES[motion], us_per_step[BENCH_RUNS / 2], worst_p999_us, worst_us, floods / BENCH_RUNS, AliveZombies(&g), BENCH_STEPS,
+               BENCH_RUNS);
+        all_alive = all_alive && AliveZombies(&g) == MAX_ALIVE_ZOMBIES;
     }
-    qsort(us_per_step, BENCH_RUNS, sizeof us_per_step[0], CompareDoubles);
-    printf("median_us_per_step=%.3f alive_zombies=%d steps=%d runs=%d\n", us_per_step[BENCH_RUNS / 2], AliveZombies(&g),
-           BENCH_STEPS, BENCH_RUNS);
-    return AliveZombies(&g) == MAX_ALIVE_ZOMBIES ? EXIT_SUCCESS : EXIT_FAILURE;
+
+    double flood_us[NAV_CELLS];
+    int goals = 0;
+    NavField field = start.nav;
+    for (int c = 0; c < NAV_CELLS; c++) {
+        if (!field.walkable[c]) continue;
+        double begin = NowSeconds();
+        NavFlood(&field, c);
+        flood_us[goals++] = (NowSeconds() - begin) * 1e6;
+    }
+    qsort(flood_us, (size_t)goals, sizeof flood_us[0], CompareDoubles);
+    GameState rebuilt = start;
+    rebuilt.nav.ready = false;
+    double begin = NowSeconds();
+    GameUpdateNav(&rebuilt);
+    printf("nav flood_median_us=%.1f flood_worst_us=%.1f goals=%d walkable_and_flood_us=%.1f\n", flood_us[goals / 2], flood_us[goals - 1], goals,
+           (NowSeconds() - begin) * 1e6);
+    return all_alive ? EXIT_SUCCESS : EXIT_FAILURE;
 }

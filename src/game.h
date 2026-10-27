@@ -7,6 +7,7 @@
 #include "raylib.h"
 
 #include "content.h"
+#include "nav.h"
 
 #define MAX_ZOMBIES 32
 #define MAX_ALIVE_ZOMBIES 24
@@ -143,7 +144,6 @@ typedef struct Zombie {
 
 typedef struct Zone {
     float min_x, max_x, min_z, max_z;
-    Vector2 portal; /* XZ point of the doorway that leads out of this zone */
 } Zone;
 
 typedef struct SpawnPoint {
@@ -236,6 +236,7 @@ typedef struct GameState {
     int zombies_left_to_spawn;
     float spawn_timer;
     bool zone_open[ZONE_COUNT];
+    NavField nav;
     int player_zone;
     int kills;
     int rounds_survived;
@@ -248,6 +249,7 @@ typedef struct GameState {
 
 void GameInit(GameState *g, uint32_t seed);
 void GameUpdate(GameState *g, const FrameInput *in, float dt);
+void GameUpdateNav(GameState *g);
 
 bool GameBlocked(const GameState *g, Vector3 pos, float radius);
 bool GameInteractableVisible(const GameState *g, int index, Vector3 eye);
