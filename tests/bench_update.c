@@ -26,6 +26,7 @@ typedef enum Motion {
 static const char *const MOTION_NAMES[] = {"still", "circle"};
 
 static double step_us[BENCH_STEPS];
+static double step_min_us[BENCH_STEPS];
 
 static int AliveZombies(const GameState *g)
 {
@@ -95,6 +96,7 @@ int main(void)
         double run_worst_us[BENCH_RUNS];
         double worst_p999_us = 0.0;
         long floods = 0;
+        for (int i = 0; i < BENCH_STEPS; i++) step_min_us[i] = INFINITY;
         for (int run = 0; run < BENCH_RUNS; run++) {
             g = start;
             double total = 0.0;
@@ -108,6 +110,7 @@ int main(void)
                 GameUpdate(&g, &idle, BENCH_DT);
                 step_us[i] = (NowSeconds() - begin) * 1e6;
                 total += step_us[i];
+                step_min_us[i] = fmin(step_min_us[i], step_us[i]);
                 floods += g.nav.goal != goal;
             }
             us_per_step[run] = total / BENCH_STEPS;
@@ -120,9 +123,12 @@ int main(void)
         }
         qsort(us_per_step, BENCH_RUNS, sizeof us_per_step[0], CompareDoubles);
         qsort(run_worst_us, BENCH_RUNS, sizeof run_worst_us[0], CompareDoubles);
-        printf("scenario=%s median_us_per_step=%.3f p999_us=%.1f median_run_worst_us=%.1f max_worst_us=%.1f floods_per_run=%ld alive_zombies=%d steps=%d "
-               "runs=%d\n",
-               MOTION_NAMES[motion], us_per_step[BENCH_RUNS / 2], worst_p999_us, run_worst_us[BENCH_RUNS / 2], run_worst_us[BENCH_RUNS - 1],
+        /* Every run replays the same deterministic steps, so a scheduler spike must hit one step in all runs to reach min_worst_us. */
+        double min_worst_us = 0.0;
+        for (int i = 0; i < BENCH_STEPS; i++) min_worst_us = fmax(min_worst_us, step_min_us[i]);
+        printf("scenario=%s median_us_per_step=%.3f p999_us=%.1f median_run_worst_us=%.1f max_worst_us=%.1f min_worst_us=%.1f floods_per_run=%ld "
+               "alive_zombies=%d steps=%d runs=%d\n",
+               MOTION_NAMES[motion], us_per_step[BENCH_RUNS / 2], worst_p999_us, run_worst_us[BENCH_RUNS / 2], run_worst_us[BENCH_RUNS - 1], min_worst_us,
                floods / BENCH_RUNS, AliveZombies(&g), BENCH_STEPS, BENCH_RUNS);
         all_alive = all_alive && AliveZombies(&g) == MAX_ALIVE_ZOMBIES;
     }
