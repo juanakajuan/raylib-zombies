@@ -212,19 +212,20 @@ static void DrawTextShadow(const char *text, int x, int y, int size, Color color
 #define UI_REFERENCE_HEIGHT 720.0f
 #define UI_SCALE_RATE 0.5f
 
+/* The HUD lays out on this frame's framebuffer. SetWindowSize changes GetScreen* before the window manager resizes. */
 static float UiScale(void)
 {
-    return 1.0f + ((float)GetScreenHeight() / UI_REFERENCE_HEIGHT - 1.0f) * UI_SCALE_RATE;
+    return 1.0f + ((float)GetRenderHeight() / UI_REFERENCE_HEIGHT - 1.0f) * UI_SCALE_RATE;
 }
 
 static int UiHeight(void)
 {
-    return (int)((float)GetScreenHeight() / UiScale());
+    return (int)((float)GetRenderHeight() / UiScale());
 }
 
 static int UiWidth(void)
 {
-    return (int)((float)GetScreenWidth() / UiScale());
+    return (int)((float)GetRenderWidth() / UiScale());
 }
 
 Vector2 UiMousePosition(void)
@@ -488,7 +489,7 @@ static void DrawBlurPass(const BlurTargets *blur, Texture2D source, Vector2 dire
 
 void GameDrawBlurred(const GameState *g, float fov_degrees)
 {
-    int width = GetScreenWidth(), height = GetScreenHeight();
+    int width = GetRenderWidth(), height = GetRenderHeight();
     BlurTargets *blur = PrepareBlur(width, height);
     Texture2D scene = blur->scene.texture, half = blur->half.texture;
 

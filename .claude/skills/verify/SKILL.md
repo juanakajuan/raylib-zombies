@@ -62,7 +62,7 @@ Each command sends real input to the game window. They return when the input is 
 | `zv click --hold 2.0` | Hold fire (automatic MP5K). |
 | `zv wheel down` / `zv wheel up` | Scroll one notch. Down selects the next weapon, up the previous. |
 | `zv look 90` / `zv look -45 10` | Turn the view by degrees: yaw positive right, pitch positive up. Exact: one mouse pixel is 0.0022 rad. |
-| `zv window` | Print the window size and `mode windowed` or `mode fullscreen`. Read-only. |
+| `zv window` | Print the window size and the mode from the last `display mode=` line in `game.log` (`windowed` or `fullscreen`). The game writes that line when the window reaches the mode. It prints `<mode> (gave up at ...)` when the game stopped its retries, and `unknown (...)` before the first line or for a build without the line. Read-only. |
 | `zv zombies` | List zombie heads visible on screen (pixel position and size). Read-only. |
 | `zv hunt --seconds 60 --until-clear --stay --restore-view` | Bot: find a zombie, turn to it, click. Reloads after 8 clicks. `--until-clear` stops when the red `ROUND N` or `GAME OVER` banner appears. `--stay` never steps back, so the player keeps its position. `--restore-view` turns back to the view direction it started with. |
 | `zv shot <name> [--crop points]` | Save the window to `<run>/shots/<name>.png`. `--crop` also saves a 2x zoom of one HUD region: `points round health weapon prompt banner center` (1280x720 window only). |

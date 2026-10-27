@@ -8,6 +8,7 @@
 #include "rlgl.h"
 
 #include "audio.h"
+#include "display_apply.h"
 #include "game.h"
 #include "input.h"
 #include "render.h"
@@ -20,7 +21,6 @@
 #define SIM_DT (1.0f / 240.0f)
 #define MAX_FRAME_TIME 0.1f
 #define LOOK_SETTLE_FRAMES 2
-#define WINDOWED_LAYOUT_DELAY_FRAMES 3
 
 #define SMOKE_SEED 20240607u
 #define SMOKE_FRAME_DT (1.0f / 60.0f)
@@ -28,11 +28,6 @@
 #define SMOKE_POINTS 3000
 #define SMOKE_SHOTS 3
 #define SMOKE_MAX_TURN 0.07f
-
-typedef enum DisplayMode {
-    DISPLAY_WINDOWED,
-    DISPLAY_FULLSCREEN,
-} DisplayMode;
 
 typedef struct SimClock {
     FrameInput pending;
@@ -51,46 +46,43 @@ static void AdvanceSim(GameState *g, SimClock *clock, const FrameInput *fresh, f
     }
 }
 
-/* GLFW lists the primary monitor first. */
-static int windowed_layout_frames;
+static const char *const WINDOW_MODE_NAMES[] = {"windowed", "fullscreen"};
+static const char *const DISPLAY_COMMAND_NAMES[] = {"enter-fullscreen", "leave-fullscreen", "place-window"};
+_Static_assert(sizeof WINDOW_MODE_NAMES / sizeof WINDOW_MODE_NAMES[0] == WINDOW_MODE_FULLSCREEN + 1, "one name per mode");
+_Static_assert(sizeof DISPLAY_COMMAND_NAMES / sizeof DISPLAY_COMMAND_NAMES[0] == DISPLAY_COMMAND_KIND_COUNT,
+               "one name per command");
 
-static void ApplyWindowedLayout(void)
+/* Returns true on a frame that sends a window command or settles. zv reads the "display mode=" lines from the
+ * game log. */
+static bool ReconcileDisplay(DisplayReconciler *display, long frame)
 {
-    /* The window manager ignores a resize of a maximized window, so it stays maximized. */
-    if (IsWindowMaximized()) return;
-    Vector2 monitor = GetMonitorPosition(0);
-    SetWindowSize(WINDOW_WIDTH, WINDOW_HEIGHT);
-    SetWindowPosition((int)monitor.x + (GetMonitorWidth(0) - WINDOW_WIDTH) / 2,
-                      (int)monitor.y + (GetMonitorHeight(0) - WINDOW_HEIGHT) / 2);
-}
-
-static void SetDisplayMode(DisplayMode mode)
-{
-    int monitor_width = GetMonitorWidth(0);
-    int monitor_height = GetMonitorHeight(0);
-    switch (mode) {
-    case DISPLAY_FULLSCREEN:
-        windowed_layout_frames = 0;
-        if (IsWindowFullscreen()) return;
-        SetWindowSize(monitor_width, monitor_height);
-        ToggleFullscreen();
-        SetWindowMonitor(0);
-        return;
-    case DISPLAY_WINDOWED:
-        if (IsWindowFullscreen()) {
-            ToggleFullscreen();
-            windowed_layout_frames = WINDOWED_LAYOUT_DELAY_FRAMES;
-        } else {
-            ApplyWindowedLayout();
+    DisplayStepResult step = DisplayUpdate(display);
+    switch (step.event) {
+    case DISPLAY_EVENT_NONE:
+        return false;
+    case DISPLAY_EVENT_SENT:
+        TraceLog(LOG_INFO, "display command=%s rect=%d,%d %dx%d attempt=%d frame=%ld", DISPLAY_COMMAND_NAMES[step.command.kind],
+                 step.command.rect.x, step.command.rect.y, step.command.rect.width, step.command.rect.height,
+                 step.next.attempts, frame);
+        return true;
+    case DISPLAY_EVENT_SETTLED:
+    case DISPLAY_EVENT_GAVE_UP: {
+        Vector2 position = GetWindowPosition();
+        PixelRect w = {(int)position.x, (int)position.y, GetRenderWidth(), GetRenderHeight()};
+        TraceLog(LOG_INFO, "display mode=%s %s window=%d,%d %dx%d screen=%dx%d frame=%ld", WINDOW_MODE_NAMES[display->target],
+                 step.event == DISPLAY_EVENT_SETTLED ? "settled" : "gave-up", w.x, w.y, w.width, w.height, GetScreenWidth(),
+                 GetScreenHeight(), frame);
+        if (GetScreenWidth() != w.width || GetScreenHeight() != w.height) {
+            TraceLog(LOG_WARNING, "display screen size %dx%d differs from the framebuffer %dx%d; world labels are off",
+                     GetScreenWidth(), GetScreenHeight(), w.width, w.height);
         }
-        return;
+        /* DisableCursor centred the hidden cursor in the old window size. Without a new centre, the first mouse
+         * motion after the change turns the view by the offset. */
+        if (IsCursorHidden()) SetMousePosition(GetScreenWidth() / 2, GetScreenHeight() / 2);
+        return true;
     }
-}
-
-/* The compositor ignores a resize or move sent in the same frame that leaves fullscreen, so the layout waits. */
-static void UpdateWindowedLayout(void)
-{
-    if (windowed_layout_frames > 0 && --windowed_layout_frames == 0) ApplyWindowedLayout();
+    }
+    return false;
 }
 
 static KeySnapshot ReadKeys(void)
@@ -162,7 +154,7 @@ static MenuEffect UpdateDebugMenu(MenuState *menu, MenuIntent intent, const Menu
 }
 
 /* Pause lives here, not in GamePhase: a paused loop just stops stepping the sim. */
-static int RunGame(bool debug)
+static int RunGame(DisplayReconciler *display, bool debug)
 {
     GameState game;
     SimClock clock = {0};
@@ -179,8 +171,7 @@ static int RunGame(bool debug)
     SetExitKey(KEY_NULL);
     DisableCursor();
 
-    while (!quit && !WindowShouldClose()) {
-        UpdateWindowedLayout();
+    for (long frame = 0; !quit && !WindowShouldClose(); frame++) {
         KeySnapshot keys = ReadKeys();
         Routed routed = RouteInput(overlay, debug, &keys, MOUSE_SENSITIVITY * settings.sensitivity);
         bool toggle_display = routed.toggle_display;
@@ -208,9 +199,11 @@ static int RunGame(bool debug)
             if (effect.kind == MENU_ACTIVATE) GameDebugApply(&game, &DEBUG_COMMANDS[effect.row]);
         }
         if (toggle_display) {
-            SetDisplayMode(IsWindowFullscreen() ? DISPLAY_WINDOWED : DISPLAY_FULLSCREEN);
-            discard_look_frames = LOOK_SETTLE_FRAMES;
+            WindowMode next = display->target == WINDOW_MODE_FULLSCREEN ? WINDOW_MODE_WINDOWED : WINDOW_MODE_FULLSCREEN;
+            *display = DisplaySetTarget(*display, next);
         }
+        /* A window move warps the cursor, so the look discard restarts on every command and settle. */
+        if (ReconcileDisplay(display, frame)) discard_look_frames = LOOK_SETTLE_FRAMES;
         if (overlay == OVERLAY_NONE) {
             FrameInput in = routed.sim;
             if (discard_look_frames > 0) {
@@ -222,7 +215,7 @@ static int RunGame(bool debug)
         BeginDrawing();
         if (overlay == OVERLAY_NONE) GameDraw(&game, settings.fov);
         else GameDrawBlurred(&game, settings.fov);
-        if (overlay == OVERLAY_PAUSE) DrawPauseOverlay(&settings, menu.selected, IsWindowFullscreen());
+        if (overlay == OVERLAY_PAUSE) DrawPauseOverlay(&settings, menu.selected, display->target == WINDOW_MODE_FULLSCREEN);
         if (overlay == OVERLAY_DEBUG) DrawDebugOverlay(&game, debug_menu.selected);
         EndDrawing();
     }
@@ -341,7 +334,7 @@ static bool SmokeWantsShot(const GameState *g, const SmokeBot *bot, int frame)
     }
 }
 
-static int RunSmoke(void)
+static int RunSmoke(DisplayReconciler *display)
 {
     GameState game;
     SimClock clock = {0};
@@ -352,6 +345,7 @@ static int RunSmoke(void)
     game.phase_timer = INTERMISSION_TIME - 1.0f;
 
     for (int frame = 0; frame < SMOKE_FRAMES && !WindowShouldClose(); frame++) {
+        ReconcileDisplay(display, frame);
         FrameInput in = SmokeInput(&game, &bot, frame);
         AdvanceSim(&game, &clock, &in, SMOKE_FRAME_DT);
         BeginDrawing();
@@ -376,7 +370,7 @@ int main(int argc, char **argv)
     bool smoke = false;
     bool debug = false;
     bool muted = AudioMuted(argc, argv);
-    DisplayMode mode = DISPLAY_FULLSCREEN;
+    WindowMode mode = WINDOW_MODE_FULLSCREEN;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--smoke") == 0) {
             smoke = true;
@@ -385,9 +379,9 @@ int main(int argc, char **argv)
         } else if (strcmp(argv[i], "--mute") == 0) {
             continue;
         } else if (strcmp(argv[i], "--fullscreen") == 0) {
-            mode = DISPLAY_FULLSCREEN;
+            mode = WINDOW_MODE_FULLSCREEN;
         } else if (strcmp(argv[i], "--windowed") == 0) {
-            mode = DISPLAY_WINDOWED;
+            mode = WINDOW_MODE_WINDOWED;
         } else {
             fprintf(stderr, "usage: %s [--fullscreen | --windowed] [--smoke] [--debug] [--mute]\n", argv[0]);
             return 2;
@@ -399,10 +393,11 @@ int main(int argc, char **argv)
     InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Zombies");
     SetWindowPosition((int)GetMonitorPosition(0).x, (int)GetMonitorPosition(0).y);
     ClearWindowState(FLAG_WINDOW_HIDDEN);
-    SetDisplayMode(smoke ? DISPLAY_WINDOWED : mode);
+    DisplayReconciler display =
+        DisplayReconcilerInit(smoke ? WINDOW_MODE_WINDOWED : mode, (PixelSize){WINDOW_WIDTH, WINDOW_HEIGHT});
     SetTargetFPS(TARGET_FPS);
     AudioInit(muted);
-    int status = smoke ? RunSmoke() : RunGame(debug);
+    int status = smoke ? RunSmoke(&display) : RunGame(&display, debug);
     AudioShutdown();
     CloseWindow();
     return status;
