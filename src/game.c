@@ -21,6 +21,7 @@
 #define STOP_DISTANCE 0.9f
 #define SEPARATION_DISTANCE 0.85f
 #define SEPARATION_SPEED 2.0f
+#define ZOMBIE_TURN_TIME 0.12f
 #define MIN_SPAWN_DISTANCE 7.0f
 #define FIRST_SPAWN_DELAY 0.8f
 #define SPRINTER_SPEED 4.0f
@@ -81,8 +82,8 @@ const BoundingBox LEVEL_OVERHANGS[] = {
 const int LEVEL_OVERHANG_COUNT = (int)(sizeof LEVEL_OVERHANGS / sizeof LEVEL_OVERHANGS[0]);
 
 const Zone LEVEL_ZONES[ZONE_COUNT] = {
-    {-10.0f, 10.0f, 0.0f, 14.0f, {0.0f, 0.0f}},
-    {-10.0f, 10.0f, -16.0f, 0.0f, {0.0f, 0.0f}},
+    {-10.0f, 10.0f, 0.0f, 14.0f},
+    {-10.0f, 10.0f, -16.0f, 0.0f},
 };
 
 const Door LEVEL_DOORS[] = {
@@ -108,12 +109,12 @@ const Interactable LEVEL_INTERACTABLES[] = {
     {INTERACT_WALL_BUY, {{9.88f, 0.9f, 6.6f}, {10.0f, 2.3f, 9.4f}}, false, 2.6f, .weapon = WEAPON_SHOTGUN},
     {INTERACT_DOOR, DOOR_BOX, false, 3.0f, .door = 0},
     {INTERACT_PERK, {{8.4f, 0.0f, 12.7f}, {10.0f, 2.4f, 14.0f}}, true, 2.6f, .perk = PERK_VITALITY},
-    /* Flush with the west wall and the partition, like the first perk, so no zombie can hide on its far side. */
-    {INTERACT_PERK, {{-10.0f, 0.0f, -1.7f}, {-8.4f, 2.4f, -0.3f}}, true, 2.6f, .perk = PERK_QUICK_HANDS},
+    {INTERACT_PERK, {{-10.0f, 0.0f, -1.6f}, {-8.4f, 2.4f, -0.3f}}, true, 2.6f, .perk = PERK_QUICK_HANDS},
 };
 const int LEVEL_INTERACTABLE_COUNT = (int)(sizeof LEVEL_INTERACTABLES / sizeof LEVEL_INTERACTABLES[0]);
 
 _Static_assert(sizeof LEVEL_ZONES / sizeof LEVEL_ZONES[0] == ZONE_COUNT, "zone table matches ZONE_COUNT");
+_Static_assert(ZONE_COUNT < 32, "the walkable mask key keeps one bit per zone and one bit that is always set");
 
 static const Vector3 PLAYER_START = {0.0f, 0.0f, 10.0f};
 
@@ -180,13 +181,13 @@ BoundingBox ZombieHeadBox(const Zombie *z)
     return (BoundingBox){{z->pos.x - 0.2f, 1.45f, z->pos.z - 0.2f}, {z->pos.x + 0.2f, 1.85f, z->pos.z + 0.2f}};
 }
 
-static int SolidSlotCount(void)
+int GameSolidCount(void)
 {
     return LEVEL_WALL_COUNT + LEVEL_DOOR_COUNT + LEVEL_INTERACTABLE_COUNT;
 }
 
 /* Walls, closed doors and solid interactables share one index space so movement and bullets agree on what is solid. */
-static const BoundingBox *SolidSlot(const GameState *g, int slot)
+const BoundingBox *GameSolid(const GameState *g, int slot)
 {
     if (slot < LEVEL_WALL_COUNT) return &LEVEL_WALLS[slot];
     slot -= LEVEL_WALL_COUNT;
@@ -197,15 +198,16 @@ static const BoundingBox *SolidSlot(const GameState *g, int slot)
     return LEVEL_INTERACTABLES[slot].solid ? &LEVEL_INTERACTABLES[slot].box : NULL;
 }
 
+static bool OverlapsSolid(const BoundingBox *b, Vector3 pos, float radius)
+{
+    return pos.x + radius > b->min.x && pos.x - radius < b->max.x && pos.z + radius > b->min.z && pos.z - radius < b->max.z;
+}
+
 bool GameBlocked(const GameState *g, Vector3 pos, float radius)
 {
-    for (int i = 0; i < SolidSlotCount(); i++) {
-        const BoundingBox *b = SolidSlot(g, i);
-        if (b == NULL) continue;
-        if (pos.x + radius > b->min.x && pos.x - radius < b->max.x &&
-            pos.z + radius > b->min.z && pos.z - radius < b->max.z) {
-            return true;
-        }
+    for (int i = 0; i < GameSolidCount(); i++) {
+        const BoundingBox *b = GameSolid(g, i);
+        if (b != NULL && OverlapsSolid(b, pos, radius)) return true;
     }
     return false;
 }
@@ -264,20 +266,11 @@ static Vector3 SlideMove(const GameState *g, Vector3 pos, Vector3 delta, int mov
     return trial;
 }
 
-static int ZoneAt(Vector3 pos, int fallback)
-{
-    for (int i = 0; i < ZONE_COUNT; i++) {
-        const Zone *z = &LEVEL_ZONES[i];
-        if (pos.x >= z->min_x && pos.x <= z->max_x && pos.z >= z->min_z && pos.z <= z->max_z) return i;
-    }
-    return fallback;
-}
-
 static float NearestSolidDistance(const GameState *g, Ray ray)
 {
     float nearest = INFINITY;
-    for (int i = 0; i < SolidSlotCount(); i++) {
-        const BoundingBox *b = SolidSlot(g, i);
+    for (int i = 0; i < GameSolidCount(); i++) {
+        const BoundingBox *b = GameSolid(g, i);
         if (b == NULL) continue;
         RayCollision hit = GetRayCollisionBox(ray, *b);
         if (hit.hit && hit.distance < nearest) nearest = hit.distance;
@@ -484,7 +477,6 @@ static void UpdateMovement(GameState *g, const FrameInput *in, float dt)
     if (crouching) speed = CROUCH_SPEED;
     Vector3 wish = Vector3Add(Vector3Scale(forward, in->move.y), Vector3Scale(right, in->move.x));
     p->pos = SlideMove(g, p->pos, Vector3Scale(wish, speed * dt), PLAYER_MOVER);
-    g->player_zone = ZoneAt(p->pos, g->player_zone);
 }
 
 int GameAliveZombies(const GameState *g)
@@ -562,7 +554,6 @@ static bool SpawnZombie(GameState *g)
         .speed = RoundZombieSpeed(g),
         .attack_timer = 0.6f,
         .growl_timer = GROWL_INTERVAL + GROWL_STAGGER * (float)((slot - g->zombies) % GROWL_STAGGER_SLOTS),
-        .zone = LEVEL_SPAWNS[spawn].zone,
     };
     return true;
 }
@@ -587,16 +578,48 @@ static void DamagePlayer(GameState *g, float amount)
     EnterPhase(g, PHASE_GAME_OVER);
 }
 
+static void FillWalkable(const GameState *g, NavField *f)
+{
+    for (int c = 0; c < NAV_CELLS; c++) {
+        f->walkable[c] = true;
+        f->solid_free[c] = true;
+    }
+    for (int i = 0; i < GameSolidCount(); i++) {
+        const BoundingBox *b = GameSolid(g, i);
+        if (b == NULL) continue;
+        float reach = fmaxf(ZOMBIE_RADIUS, NAV_CELL_SIZE / 2.0f);
+        int first = NavCellAt((Vector3){b->min.x - reach, 0.0f, b->min.z - reach});
+        int last = NavCellAt((Vector3){b->max.x + reach, 0.0f, b->max.z + reach});
+        for (int row = first / NAV_COLS; row <= last / NAV_COLS; row++) {
+            for (int c = row * NAV_COLS + first % NAV_COLS; c <= row * NAV_COLS + last % NAV_COLS; c++) {
+                if (OverlapsSolid(b, NavCellCenter(c), ZOMBIE_RADIUS)) f->walkable[c] = false;
+                if (OverlapsSolid(b, NavCellCenter(c), NAV_CELL_SIZE / 2.0f)) f->solid_free[c] = false;
+            }
+        }
+    }
+}
+
+void GameUpdateNav(GameState *g)
+{
+    NavField *f = &g->nav;
+    uint32_t open_zones = 1u << ZONE_COUNT;
+    for (int i = 0; i < ZONE_COUNT; i++) open_zones |= g->zone_open[i] ? 1u << i : 0u;
+    int goal = NavCellAt(g->player.pos);
+    if (f->walkable_open_zones != open_zones) {
+        FillWalkable(g, f);
+        f->walkable_open_zones = open_zones;
+    } else if (f->goal == goal) {
+        return;
+    }
+    NavFlood(f, g->player.pos);
+}
+
 static Vector3 ZombieSteering(const GameState *g, const Zombie *z)
 {
     if (z->state == ZOMBIE_ATTACK) return Vector3Zero();
     Vector3 target = PlayerFloorPoint(g);
-    if (z->zone != g->player_zone) {
-        target = (Vector3){LEVEL_ZONES[z->zone].portal.x, 0.0f, LEVEL_ZONES[z->zone].portal.y};
-    } else if (Vector3Distance(target, z->pos) <= STOP_DISTANCE) {
-        return Vector3Zero();
-    }
-    return Vector3Normalize(Vector3Subtract(target, z->pos));
+    if (Vector3Distance(target, z->pos) <= STOP_DISTANCE) return Vector3Zero();
+    return NavDirection(&g->nav, z->pos, target);
 }
 
 static Vector3 ZombieSeparation(const GameState *g, int index)
@@ -637,8 +660,10 @@ static void UpdateZombie(GameState *g, int index, float dt)
     Vector3 steer = ZombieSteering(g, z);
     Vector3 velocity = Vector3Add(Vector3Scale(steer, z->speed), Vector3Scale(ZombieSeparation(g, index), SEPARATION_SPEED));
     z->pos = SlideMove(g, z->pos, Vector3Scale(velocity, dt), index);
-    z->zone = ZoneAt(z->pos, z->zone);
-    if (Vector3LengthSqr(steer) > 0.0f) z->yaw = atan2f(steer.x, -steer.z);
+    if (Vector3LengthSqr(steer) > 0.0f) {
+        float turn = remainderf(atan2f(steer.x, -steer.z) - z->yaw, 2.0f * PI);
+        z->yaw = remainderf(z->yaw + turn * (1.0f - expf(-dt / ZOMBIE_TURN_TIME)), 2.0f * PI);
+    }
 
     Vector3 to_player = Vector3Subtract(PlayerFloorPoint(g), z->pos);
     float distance = Vector3Length(to_player);
@@ -887,6 +912,7 @@ void GameUpdate(GameState *g, const FrameInput *in, float dt)
     UpdateMovement(g, in, dt);
     UpdateInteraction(g, in);
     UpdateWeapon(g, in, dt);
+    GameUpdateNav(g);
     for (int i = 0; i < MAX_ZOMBIES; i++) UpdateZombie(g, i, dt);
     UpdateHealth(g, dt);
     UpdateRound(g, dt);

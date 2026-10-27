@@ -95,7 +95,7 @@ ctest --test-dir build --output-on-failure
 `zombies_test` drives the simulation headlessly with scripted input.
 `--smoke` opens the real window, plays a scripted bot for about 10 seconds and writes `smoke_1.png`, `smoke_2.png` and `smoke_3.png` to the working directory.
 
-`./build/zombies_bench` measures the simulation cost. It prints the median microseconds per `GameUpdate` step at 240 Hz with 24 chasing zombies, over 7 runs. It is not part of `ctest`. Use a Release build for the measurement.
+`./build/zombies_bench` measures the simulation cost at 240 Hz with 24 chasing zombies, over 7 runs. For a player that stands still and for a player that walks a circle, it prints the median microseconds per `GameUpdate` step, the 99.9th percentile step, the median and the maximum of the worst step in each run, and the number of zombie flow-field floods. Then it prints the time of one flood and of a full field rebuild, and the median microseconds per `RouteInput` call for a busy frame of play. It is not part of `ctest`. Use a Release build for the measurement.
 
 ## Sound sources and licenses
 
