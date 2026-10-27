@@ -9,7 +9,6 @@
 #define NAV_SEED_REACH 0.9f
 
 #define LOOKAHEAD_CELLS 3
-#define LINE_START_NUDGE 1e-4f
 
 static const int STEP_DX[8] = {1, -1, 0, 0, 1, 1, -1, -1};
 static const int STEP_DZ[8] = {0, 0, 1, -1, 1, -1, 1, -1};
@@ -86,13 +85,16 @@ static void QueueLower(CostQueue *q, uint16_t *cost, int cell, uint16_t value)
 
 static bool LineOpen(const bool *open, Vector3 from, Vector3 to)
 {
-    int cell = NavCellAt(Vector3Lerp(from, to, LINE_START_NUDGE));
+    int cell = NavCellAt(from);
     int col = cell % NAV_COLS;
     int row = cell / NAV_COLS;
-    int end = NavCellAt(to);
-    int steps = abs(end % NAV_COLS - col) + abs(end / NAV_COLS - row);
     float dx = to.x - from.x;
     float dz = to.z - from.z;
+    if (dx < 0.0f && NAV_MIN_X + (float)col * NAV_CELL_SIZE == from.x) col--;
+    if (dz < 0.0f && NAV_MIN_Z + (float)row * NAV_CELL_SIZE == from.z) row--;
+    if (col < 0 || row < 0) return false;
+    int end = NavCellAt(to);
+    int steps = abs(end % NAV_COLS - col) + abs(end / NAV_COLS - row);
     int step_col = dx > 0.0f ? 1 : -1;
     int step_row = dz > 0.0f ? 1 : -1;
     float delta_x = dx != 0.0f ? NAV_CELL_SIZE / fabsf(dx) : INFINITY;
